@@ -61,7 +61,7 @@ export const useNotifications = () => {
 
   // Cada notificación: se agrega al modal de Notificaciones y se envía como push nueva del navegador (si hay permiso)
   const addNotification = useCallback((notification) => {
-    const id = Math.random().toString(36).substr(2, 9);
+    const id = notification.id || Math.random().toString(36).substr(2, 9);
     const now = new Date();
     const newNotification = {
       ...notification,
