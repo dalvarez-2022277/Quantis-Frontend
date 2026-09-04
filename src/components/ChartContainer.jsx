@@ -30,7 +30,8 @@ const ChartContainer = forwardRef(({
   responsive = true,
   style = {},
   className = '',
-  compact = false
+  compact = false,
+  emptyMessage = 'No hay datos para mostrar'
 }, ref) => {
   const { darkMode } = useTheme();
   const chartRef = useRef(null);
@@ -104,8 +105,11 @@ const ChartContainer = forwardRef(({
 
   if (!chartOption) {
     return (
-      <div className={`bg-gray-50 dark:bg-gray-800 rounded-lg p-6 text-center ${className}`}>
-        <p className="text-gray-500 dark:text-gray-400">No hay datos para mostrar</p>
+      <div
+        className={`flex items-center justify-center bg-gray-50 dark:bg-gray-800 rounded-lg p-6 text-center ${className}`}
+        style={{ minHeight: compact ? height : '200px', ...style }}
+      >
+        <p className="text-gray-500 dark:text-gray-400">{emptyMessage}</p>
       </div>
     );
   }
