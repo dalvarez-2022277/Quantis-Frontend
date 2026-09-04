@@ -1,0 +1,734 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global layout constants + colores de tema (modificables en Configuración) */
+:root {
+  --header-height: 64px;
+  --layout-nav-height: 48px;
+  --section-nav-height: var(--layout-nav-height);
+  --tabs-height: 56px;
+  /* Tema de colores: primary (general), income (ingresos), expense (gastos). Default: acento neutro negro/claro. */
+  --q-primary: #171717;
+  --q-primary-dark: #f5f5f5;
+  --q-income: #34d181;
+  --q-income-dark: #5ee0a0;
+  --q-expense: #ed4e4e;
+  --q-expense-dark: #f07a7a;
+}
+/* En modo oscuro usamos las variantes _dark */
+.dark .text-q-primary,
+.dark .hover\:text-q-primary:hover { color: var(--q-primary-dark); }
+.dark .bg-q-primary { background-color: var(--q-primary-dark); color: #171717; }
+.dark .peer:checked ~ .peer-checked\:bg-q-primary { background-color: var(--q-primary-dark); color: #171717; }
+.dark .bg-q-primary .text-white,
+.dark .peer:checked ~ .peer-checked\:bg-q-primary .text-white { color: #171717 !important; }
+.dark .border-q-primary { border-color: var(--q-primary-dark); }
+.dark .focus\:ring-q-primary:focus { --tw-ring-color: var(--q-primary-dark); }
+.dark .text-q-income,
+.dark .hover\:text-q-income:hover { color: var(--q-income-dark); }
+.dark .bg-q-income { background-color: var(--q-income-dark); }
+.dark .peer:checked ~ .peer-checked\:bg-q-income { background-color: var(--q-income-dark); }
+.dark .border-q-income { border-color: var(--q-income-dark); }
+.dark .focus\:ring-q-income:focus { --tw-ring-color: var(--q-income-dark); }
+.dark .text-q-expense,
+.dark .hover\:text-q-expense:hover { color: var(--q-expense-dark); }
+.dark .bg-q-expense { background-color: var(--q-expense-dark); }
+.dark .peer:checked ~ .peer-checked\:bg-q-expense { background-color: var(--q-expense-dark); }
+.dark .border-q-expense { border-color: var(--q-expense-dark); }
+.dark .focus\:ring-q-expense:focus { --tw-ring-color: var(--q-expense-dark); }
+
+/* Clases de utilidad para colores de tema (modo claro usa --q-*, modo oscuro usa --q-*-dark vía .dark arriba) */
+.text-q-primary { color: var(--q-primary); }
+.hover\:text-q-primary:hover { color: var(--q-primary); }
+.bg-q-primary { background-color: var(--q-primary); }
+.bg-q-primary-muted { background-color: color-mix(in srgb, var(--q-primary) 12%, transparent); }
+.dark .bg-q-primary-muted { background-color: color-mix(in srgb, var(--q-primary-dark) 18%, transparent); }
+.peer:checked ~ .peer-checked\:bg-q-primary { background-color: var(--q-primary); }
+.border-q-primary { border-color: var(--q-primary); }
+.focus\:ring-q-primary:focus { --tw-ring-color: var(--q-primary); }
+.ring-q-primary { --tw-ring-color: var(--q-primary); }
+/* Toggle/peer: cuando el input peer tiene foco, el anillo usa el color del tema */
+.peer:focus ~ .peer-focus\:ring-q-primary { --tw-ring-color: var(--q-primary); }
+.peer:focus ~ .peer-focus\:ring-q-income { --tw-ring-color: var(--q-income); }
+.peer:focus ~ .peer-focus\:ring-q-expense { --tw-ring-color: var(--q-expense); }
+
+.text-q-income { color: var(--q-income); }
+.hover\:text-q-income:hover { color: var(--q-income); }
+.group:hover .group-hover\:text-q-income { color: var(--q-income); }
+.dark .group:hover .group-hover\:text-q-income { color: var(--q-income-dark); }
+.bg-q-income { background-color: var(--q-income); }
+.hover\:bg-q-income:hover { background-color: color-mix(in srgb, var(--q-income) 88%, black); }
+.dark .hover\:bg-q-income:hover { background-color: color-mix(in srgb, var(--q-income-dark) 88%, black); }
+.peer:checked ~ .peer-checked\:bg-q-income { background-color: var(--q-income); }
+.border-q-income { border-color: var(--q-income); }
+.focus\:ring-q-income:focus { --tw-ring-color: var(--q-income); }
+
+.text-q-expense { color: var(--q-expense); }
+.hover\:text-q-expense:hover { color: var(--q-expense); }
+.group:hover .group-hover\:text-q-expense { color: var(--q-expense); }
+.dark .group:hover .group-hover\:text-q-expense { color: var(--q-expense-dark); }
+.bg-q-expense { background-color: var(--q-expense); }
+.hover\:bg-q-expense:hover { background-color: color-mix(in srgb, var(--q-expense) 88%, black); }
+.dark .hover\:bg-q-expense:hover { background-color: color-mix(in srgb, var(--q-expense-dark) 88%, black); }
+.peer:checked ~ .peer-checked\:bg-q-expense { background-color: var(--q-expense); }
+.border-q-expense { border-color: var(--q-expense); }
+.focus\:ring-q-expense:focus { --tw-ring-color: var(--q-expense); }
+
+/* Fondos y bordes suaves (muted) para ingresos y gastos */
+.bg-q-income-muted { background-color: color-mix(in srgb, var(--q-income) 14%, transparent); }
+.dark .bg-q-income-muted { background-color: color-mix(in srgb, var(--q-income-dark) 18%, transparent); }
+.border-q-income-muted { border-color: color-mix(in srgb, var(--q-income) 35%, transparent); }
+.dark .border-q-income-muted { border-color: color-mix(in srgb, var(--q-income-dark) 40%, transparent); }
+.text-q-income-muted { color: color-mix(in srgb, var(--q-income) 85%, black); }
+.dark .text-q-income-muted { color: color-mix(in srgb, var(--q-income-dark) 90%, white); }
+.hover\:bg-q-income-muted:hover { background-color: color-mix(in srgb, var(--q-income) 22%, transparent); }
+.dark .hover\:bg-q-income-muted:hover { background-color: color-mix(in srgb, var(--q-income-dark) 28%, transparent); }
+
+.bg-q-expense-muted { background-color: color-mix(in srgb, var(--q-expense) 14%, transparent); }
+.dark .bg-q-expense-muted { background-color: color-mix(in srgb, var(--q-expense-dark) 18%, transparent); }
+.border-q-expense-muted { border-color: color-mix(in srgb, var(--q-expense) 35%, transparent); }
+.dark .border-q-expense-muted { border-color: color-mix(in srgb, var(--q-expense-dark) 40%, transparent); }
+.text-q-expense-muted { color: color-mix(in srgb, var(--q-expense) 85%, black); }
+.dark .text-q-expense-muted { color: color-mix(in srgb, var(--q-expense-dark) 90%, white); }
+.hover\:bg-q-expense-muted:hover { background-color: color-mix(in srgb, var(--q-expense) 22%, transparent); }
+.dark .hover\:bg-q-expense-muted:hover { background-color: color-mix(in srgb, var(--q-expense-dark) 28%, transparent); }
+
+/* Móvil: header 56px; barra de tabs 48px; barra inferior 64px + safe area */
+@media (max-width: 1023px) {
+  :root {
+    --header-height: 56px;
+    --layout-nav-height: 48px;
+    --bottom-nav-height: 64px;
+  }
+  .main-with-bottom-nav {
+    padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 1rem) !important;
+  }
+}
+
+/* Desktop: padding normal del main */
+.main-with-bottom-nav {
+  padding-bottom: 1.5rem;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: auto;
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #ffffff;
+  transition: background-color 0.4s ease;
+}
+
+/* Modo oscuro para el body */
+.dark body {
+  background-color: #111827;
+}
+
+/* Transición suave al cambiar tema claro/oscuro (aplicar a contenedores de auth) */
+.theme-transition {
+  transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease;
+}
+
+/* Solo aplicar tema oscuro si el usuario lo ha seleccionado manualmente */
+html.dark body {
+  background-color: #111827;
+}
+
+/* Verificar localStorage y aplicar tema inmediatamente */
+html.dark body {
+  background-color: #111827;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Elementos interactivos: mejor detección de toques en iOS/móvil */
+button,
+a[href],
+[role="button"] {
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none; /* Sin menú de llamada al mantener en iOS */
+}
+
+/* Enlaces y botones de navegación: sin aspecto "seleccionado" ni selección de texto al tocar */
+nav a,
+nav button,
+[role="navigation"] a,
+[role="navigation"] button {
+  -webkit-tap-highlight-color: transparent !important;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  outline: none;
+}
+nav a:active,
+nav button:active,
+[role="navigation"] a:active,
+[role="navigation"] button:active {
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Asegurar que las clases de Tailwind se apliquen */
+.min-h-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* ============================================
+   SAFE AREA SYSTEM - Estilo Flutter
+   El componente SafeArea maneja toda la lógica de safe areas.
+   Aquí solo mantenemos valores base de env() para compatibilidad.
+   ============================================ */
+
+/* Fallback altura en Safari iOS antiguo */
+@supports (-webkit-touch-callout: none) {
+  .min-h-screen {
+    min-height: -webkit-fill-available;
+  }
+}
+
+/* Pantallas de auth (login/register): viewport estable en iOS/Android y PWA */
+.min-h-screen-auth {
+  min-height: 100dvh;
+  min-height: 100vh;
+}
+@supports (-webkit-touch-callout: none) {
+  .min-h-screen-auth {
+    min-height: -webkit-fill-available;
+  }
+}
+
+/* Clases legacy para compatibilidad - se eliminarán gradualmente */
+/* Estas clases ahora son manejadas por el componente SafeArea */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-area-main-top {
+  padding-top: calc(4rem + env(safe-area-inset-top, 0px));
+}
+
+.safe-area-padding {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.bg-gradient-to-br {
+  background-image: linear-gradient(to bottom right, var(--tw-gradient-stops));
+}
+
+.from-blue-50 {
+  --tw-gradient-from: #eff6ff;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(239, 246, 255, 0));
+}
+
+.dark .from-blue-50 {
+  --tw-gradient-from: #1e3a8a;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(30, 58, 138, 0));
+}
+
+.via-white {
+  --tw-gradient-stops: var(--tw-gradient-from), #ffffff, var(--tw-gradient-to, rgba(255, 255, 255, 0));
+}
+
+.dark .via-white {
+  --tw-gradient-stops: var(--tw-gradient-from), #1f2937, var(--tw-gradient-to, rgba(31, 41, 55, 0));
+}
+
+.to-indigo-50 {
+  --tw-gradient-to: #eef2ff;
+}
+
+.dark .to-indigo-50 {
+  --tw-gradient-to: #312e81;
+}
+
+/* Estilos responsive adicionales */
+@media (max-width: 640px) {
+  /* Ajustes para móviles muy pequeños */
+  .text-xs {
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+  
+  .text-sm {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+  
+  /* Mejorar el espaciado en móviles */
+  .space-y-4 > * + * {
+    margin-top: 1rem;
+  }
+  
+  .space-y-5 > * + * {
+    margin-top: 1.25rem;
+  }
+}
+
+/* Mejorar la experiencia táctil en móviles */
+@media (hover: none) and (pointer: coarse) {
+  .hover\:shadow-md:hover {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  }
+  
+  .hover\:shadow-xl:hover {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  }
+}
+
+/* Asegurar que los elementos sean táctiles en móviles */
+button, a, input, select, textarea {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+@media (max-width: 640px) {
+  button, a, input, select, textarea {
+    min-height: 40px;
+  }
+}
+
+/* Prevenir zoom automático en inputs en móviles (sin tocar border-radius para permitir inputs redondeados) */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="tel"],
+input[type="url"],
+input[type="search"],
+textarea,
+select {
+  font-size: 16px !important;
+  -webkit-text-size-adjust: 100%;
+  -webkit-appearance: none;
+}
+
+/* Asegurar que los inputs mantengan el tamaño correcto en móviles */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="tel"],
+  input[type="url"],
+  input[type="search"],
+  textarea,
+  select {
+    font-size: 16px !important;
+    transform: scale(1);
+  }
+}
+
+/* Optimizaciones específicas para iPhone con Dynamic Island */
+@supports (padding: max(0px)) {
+  .notification-container {
+    top: max(env(safe-area-inset-top, 0px) + 8px, 8px) !important;
+  }
+}
+
+/* Mejorar la experiencia en dispositivos con notch/Dynamic Island */
+@media screen and (device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3),
+       screen and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2),
+       screen and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3),
+       screen and (device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3),
+       screen and (device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) {
+  .notification-container {
+    top: max(env(safe-area-inset-top, 0px) + 12px, 12px) !important;
+    padding-left: max(env(safe-area-inset-left, 0px) + 16px, 16px) !important;
+    padding-right: max(env(safe-area-inset-right, 0px) + 16px, 16px) !important;
+  }
+  
+  .notification-item {
+    margin-bottom: 8px !important;
+  }
+}
+
+/* Asegurar que las notificaciones no interfieran con la Dynamic Island */
+.notification-container {
+  position: fixed !important;
+  z-index: 9999 !important;
+  pointer-events: none;
+}
+
+.notification-container > * {
+  pointer-events: auto;
+}
+
+/* Estilos para autocompletado del navegador en modo claro */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px #ffffff inset !important; /* Fondo blanco */
+  -webkit-text-fill-color: #111827 !important; /* Texto oscuro */
+  transition: background-color 5000s ease-in-out 0s; /* Transición suave */
+}
+
+/* Para inputs en modo oscuro */
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus,
+.dark input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px #374151 inset !important; /* Fondo gris oscuro */
+  -webkit-text-fill-color: #ffffff !important; /* Texto blanco */
+  transition: background-color 5000s ease-in-out 0s; /* Transición suave */
+}
+
+/* Estilos adicionales para Firefox en modo claro */
+input:-moz-autofill {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+/* Estilos adicionales para Firefox en modo oscuro */
+.dark input:-moz-autofill {
+  background-color: #374151 !important;
+  color: #ffffff !important;
+}
+
+/* Transición suave para el cambio de modo oscuro */
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Transición más rápida para elementos específicos */
+button, input, select, textarea {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+/* Transición para elementos de navegación */
+nav, .sidebar, .header {
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Animación de rotación lenta para el switch de ingreso recurrente */
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+/* Estilos personalizados para el calendario */
+input[type="date"] {
+  position: relative;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  background: transparent;
+  bottom: 0;
+  color: transparent;
+  cursor: pointer;
+  height: auto;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: auto;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 4px;
+}
+
+/* Mejorar la apariencia del calendario en modo oscuro */
+.dark input[type="date"] {
+  color-scheme: dark;
+}
+
+/* Estilos para el botón de fecha */
+.date-picker-button {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+}
+
+.date-picker-button:hover {
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+}
+
+.date-picker-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+}
+
+/* Animación para indicador recurrente - gira solo unas veces */
+@keyframes spin-limited {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(720deg); } /* 2 vueltas completas */
+}
+
+.animate-spin-limited {
+  animation: spin-limited 2s ease-in-out;
+  animation-fill-mode: forwards;
+}
+
+/* ===== SCROLLBAR PERSONALIZADA PARA PC ===== */
+
+/* Scrollbar personalizada para navegadores webkit (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.5);
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.8);
+}
+
+/* Scrollbar para modo oscuro */
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(75, 85, 99, 0.5);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(75, 85, 99, 0.8);
+}
+
+/* Scrollbar más delgada para elementos pequeños */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.3);
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.6);
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(75, 85, 99, 0.3);
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(75, 85, 99, 0.6);
+}
+
+/* Scrollbar invisible para móviles */
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 0px;
+    height: 0px;
+    background: transparent;
+  }
+}
+
+/* ===== MEJORAS DE SCROLL PARA PC ===== */
+
+/* Smooth scroll para toda la aplicación */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Mejorar el scroll en contenedores específicos */
+.scroll-container {
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+}
+
+.dark .scroll-container {
+  scrollbar-color: rgba(75, 85, 99, 0.5) transparent;
+}
+
+/* Scroll suave para elementos con overflow */
+.overflow-y-auto,
+.overflow-y-scroll {
+  scroll-behavior: smooth;
+}
+
+/* Mejorar el scroll en listas largas */
+.space-y-3 > * + * {
+  scroll-margin-top: 0.75rem;
+}
+
+/* Optimizar el scroll en modales */
+.modal-content {
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+/* Prevenir scroll bounce en iOS */
+@supports (-webkit-touch-callout: none) {
+  body {
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .overflow-y-auto,
+  .overflow-y-scroll {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+}
+
+/* ===== CORRECCIONES ESPECÍFICAS PARA SAFARI iOS ===== */
+
+/* Eliminar bordes negros temporales durante animaciones en Safari iOS */
+@supports (-webkit-touch-callout: none) {
+  /* Resetear apariencia predeterminada de Safari iOS */
+  button, input, select, textarea, div {
+    -webkit-appearance: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Eliminar bordes negros en elementos animados */
+  .animate-spin,
+  .animate-spin-slow,
+  .animate-spin-limited,
+  [class*="animate-"] {
+    border-color: transparent !important;
+    outline: none !important;
+    -webkit-appearance: none !important;
+  }
+  
+  /* Específicamente para spinners de carga */
+  .animate-spin.rounded-full {
+    border-color: transparent !important;
+    border-top-color: currentColor !important;
+  }
+
+  /* Durante la carga, los spinners no deben capturar toques (iOS) */
+  .animate-spin,
+  .animate-spin-slow,
+  .animate-spin-limited {
+    pointer-events: none;
+    contain: layout;
+  }
+  
+  /* Eliminar bordes en tarjetas durante animaciones */
+  .bg-white,
+  .dark\\:bg-gray-800,
+  [class*="bg-white"],
+  [class*="bg-gray"] {
+    border: none !important;
+    outline: none !important;
+    -webkit-appearance: none !important;
+  }
+  
+  /* Prevenir bordes negros en elementos con motion */
+  [data-framer-motion] {
+    border: none !important;
+    outline: none !important;
+    -webkit-appearance: none !important;
+  }
+  
+  /* Eliminar bordes en elementos con transiciones */
+  [style*="transition"],
+  [class*="transition"] {
+    border: none !important;
+    outline: none !important;
+  }
+}
+
+/* Corrección adicional para elementos específicos de la página de ingresos */
+@supports (-webkit-touch-callout: none) {
+  /* Eliminar bordes en las tarjetas de ingresos */
+  .rounded-xl {
+    border: 1px solid transparent !important;
+    outline: none !important;
+  }
+  
+  /* Asegurar que los bordes sean visibles solo cuando sea necesario */
+  .border-gray-200,
+  .dark\\:border-gray-700 {
+    border-color: rgb(229 231 235) !important;
+  }
+  
+  .dark .border-gray-200,
+  .dark .dark\\:border-gray-700 {
+    border-color: rgb(55 65 81) !important;
+  }
+  
+  /* Eliminar bordes negros en elementos con hover */
+  .hover\\:border-gray-300:hover,
+  .dark\\:hover\\:border-gray-600:hover {
+    border-color: rgb(209 213 219) !important;
+  }
+  
+  .dark .hover\\:border-gray-300:hover,
+  .dark .dark\\:hover\\:border-gray-600:hover {
+    border-color: rgb(75 85 99) !important;
+  }
+}
+
+/* Corrección específica para el problema de Safari iOS con bordes temporales */
+@media screen and (-webkit-min-device-pixel-ratio: 2) {
+  /* Solo para dispositivos iOS con pantalla Retina */
+  .bg-white,
+  .dark\\:bg-gray-800 {
+    border: 1px solid transparent !important;
+    background-clip: padding-box !important;
+  }
+  
+  /* Asegurar que los bordes se muestren correctamente */
+  .border-gray-200 {
+    border-color: rgb(229 231 235) !important;
+  }
+  
+  .dark .border-gray-200 {
+    border-color: rgb(55 65 81) !important;
+  }
+}
+
+/* Toggles: en modo oscuro el switch "on" debe usar la variante clara (--q-*-dark) */
+.dark .peer:checked ~ .peer-checked\:bg-q-primary { background-color: var(--q-primary-dark); }
+.dark .peer:checked ~ .peer-checked\:bg-q-income { background-color: var(--q-income-dark); }
+.dark .peer:checked ~ .peer-checked\:bg-q-expense { background-color: var(--q-expense-dark); }

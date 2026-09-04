@@ -1,0 +1,17 @@
+# Frontend (nginx + estáticos). Levanta solo la web.
+# Primero en Quantis-Backend: docker compose up -d  (postgres + api en :5000)
+# Luego aquí: docker compose up -d --build
+# VITE_BACKEND_URL = URL del API tal como la ve el navegador (p. ej. http://localhost:5000)
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:5000}
+        VITE_API_URL: ${VITE_API_URL:-}
+    container_name: quantis-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"

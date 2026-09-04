@@ -1,0 +1,24 @@
+# Configuración específica para Render.com
+# Este archivo asegura que todas las rutas SPA funcionen correctamente
+
+# Redirigir todas las rutas que no sean archivos estáticos a index.html
+# Esto es necesario para que React Router funcione correctamente
+
+# Rutas específicas de la aplicación
+/login /index.html 200
+/register /index.html 200
+/dashboard /index.html 200
+/profile /index.html 200
+/ajustes /index.html 200
+/forgot-password /index.html 200
+/reset-password /index.html 200
+/auth/callback /index.html 200
+
+# Catch-all para cualquier otra ruta
+/* /index.html 200
+
+# Headers para archivos HTML
+/index.html 200!
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0

@@ -1,0 +1,24 @@
+# Exported from Render on 2025-10-07T06:55:07Z
+version: "1"
+services:
+- type: web
+  name: Quantis-Frontend1
+  runtime: static
+  repo: https://github.com/dalvarez-2022277/Quantis-Frontend
+  branch: develop
+  envVars:
+  - key: VITE_PASSWORD_SALT
+    sync: false
+  - key: VITE_ENABLE_SECURITY_HEADERS
+    sync: false
+  - key: VITE_CSP_ENABLED
+    sync: false
+  - key: VITE_BACKEND_URL
+    sync: false
+  - key: VITE_API_URL
+    sync: false
+  - key: NODE_ENV
+    sync: false
+  buildCommand: npm run build
+  staticPublishPath: dist
+  autoDeployTrigger: commit

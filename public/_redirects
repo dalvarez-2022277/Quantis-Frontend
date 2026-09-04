@@ -1,0 +1,15 @@
+# Configuración para Netlify/Render - SPA React Router
+# Redirigir todas las rutas que no sean archivos estáticos a index.html
+
+# Rutas de la aplicación
+/login /index.html 200
+/register /index.html 200
+/dashboard /index.html 200
+/profile /index.html 200
+/ajustes /index.html 200
+/forgot-password /index.html 200
+/reset-password /index.html 200
+/auth/callback /index.html 200
+
+# Catch-all para cualquier otra ruta
+/* /index.html 200

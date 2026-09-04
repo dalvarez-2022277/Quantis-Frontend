@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/assets/logos/Quantisicon.png" />
+    <link rel="apple-touch-icon" href="/assets/logos/Quantisicon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Sin acento azul: debe coincidir con header/fondo (Android pinta la barra del sistema con theme-color) -->
+    <meta id="quantis-theme-color" name="theme-color" content="#ffffff" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Quantis" />
+    <title>Quantis - Gestor de Finanzas Personales</title>
+    <script>
+      // Ejecutar antes de pintar: tema y modo aplicación web (standalone)
+      (function() {
+        var doc = document.documentElement;
+        try {
+          var savedTheme = localStorage.getItem('darkMode');
+          if (savedTheme === 'true') {
+            doc.classList.add('dark');
+            document.body.classList.add('dark');
+          }
+          var themeMeta = document.getElementById('quantis-theme-color');
+          if (themeMeta) {
+            themeMeta.setAttribute('content', savedTheme === 'true' ? '#1f2937' : '#ffffff');
+          }
+        } catch (e) {}
+        // Marcar modo "abrir como app web" para aplicar safe areas correctamente
+        try {
+          function setStandalone() {
+            if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) {
+              doc.classList.add('standalone');
+            }
+          }
+          setStandalone();
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setStandalone);
+          }
+          if (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream) {
+            doc.classList.add('ios');
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
