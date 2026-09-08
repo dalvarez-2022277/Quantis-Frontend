@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { getMonthName } from '../utils/dateUtils';
 import MonthYearPickerModal from './MonthYearPickerModal';
@@ -19,7 +18,6 @@ function MonthYearPillNav({
   className = '',
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const monthKey = `${month}-${year}`;
 
   return (
     <>
@@ -41,23 +39,14 @@ function MonthYearPillNav({
           className="relative flex min-h-[2rem] min-w-0 max-w-[9rem] shrink-0 flex-col items-center justify-center px-1.5 py-0.5 sm:max-w-[11rem] sm:px-2"
           aria-label={`Elegir mes y año, ${getMonthName(month)} ${year}`}
         >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={monthKey}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.15, ease: 'easeOut' }}
-              className="flex flex-col items-center text-center"
-            >
-              <span className="max-w-full truncate text-[11px] font-semibold leading-tight text-gray-900 dark:text-white sm:text-xs">
-                {getMonthName(month)}
-              </span>
-              <span className="mt-px text-[10px] font-medium tabular-nums leading-none text-gray-500 dark:text-gray-400">
-                {year}
-              </span>
-            </motion.div>
-          </AnimatePresence>
+          <div className="flex flex-col items-center text-center">
+            <span className="max-w-full truncate text-[11px] font-semibold leading-tight text-gray-900 dark:text-white sm:text-xs">
+              {getMonthName(month)}
+            </span>
+            <span className="mt-px text-[10px] font-medium tabular-nums leading-none text-gray-500 dark:text-gray-400">
+              {year}
+            </span>
+          </div>
         </button>
 
         <button

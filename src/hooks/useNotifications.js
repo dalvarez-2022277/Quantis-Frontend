@@ -1,5 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
+import { sileo } from 'sileo';
 import { usePersistedState } from './usePersistedState';
+
+const SILEO_FILL = {
+  success: 'var(--q-income)',
+  error: 'var(--q-expense)',
+  warning: '#f59e0b',
+  info: 'var(--q-primary)',
+};
 
 const STORAGE_KEY = 'quantis_notifications';
 
@@ -102,21 +110,31 @@ export const useNotifications = () => {
     return permission;
   }, []);
 
+  // Toast tipo "isla" (sileo): pastilla no bloqueante, respeta el safe-area
+  // del notch/isla dinámica en el <Toaster> montado en App.jsx.
+  const showToast = useCallback((type, title, message) => {
+    sileo[type]({ title, description: message, fill: SILEO_FILL[type] });
+  }, []);
+
   const showSuccess = useCallback((title, message) => {
+    showToast('success', title, message);
     return addNotification({ type: 'success', title, message });
-  }, [addNotification]);
+  }, [addNotification, showToast]);
 
   const showError = useCallback((title, message) => {
+    showToast('error', title, message);
     return addNotification({ type: 'error', title, message });
-  }, [addNotification]);
+  }, [addNotification, showToast]);
 
   const showWarning = useCallback((title, message) => {
+    showToast('warning', title, message);
     return addNotification({ type: 'warning', title, message });
-  }, [addNotification]);
+  }, [addNotification, showToast]);
 
   const showInfo = useCallback((title, message) => {
+    showToast('info', title, message);
     return addNotification({ type: 'info', title, message });
-  }, [addNotification]);
+  }, [addNotification, showToast]);
 
   return {
     notifications,

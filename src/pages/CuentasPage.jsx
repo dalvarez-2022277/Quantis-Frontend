@@ -379,8 +379,9 @@ const CuentasPage = ({ embedded = false }) => {
                     Saldo inicial (opcional)
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*\.?[0-9]*"
                     value={formData.saldoInicial}
                     onChange={(e) =>
                       setFormData({ ...formData, saldoInicial: e.target.value })

@@ -1,5 +1,7 @@
 import React, { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Toaster } from 'sileo'
+import 'sileo/styles.css'
 import { useAuthContext } from './contexts/AuthContext'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -55,6 +57,11 @@ function App() {
   return (
     <>
       <ScrollToTop />
+      <Toaster
+        position="top-center"
+        theme="system"
+        offset={{ top: 'calc(env(safe-area-inset-top) + 10px)' }}
+      />
       <Routes>
       {/* Rutas públicas */}
       <Route
