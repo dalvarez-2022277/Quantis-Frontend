@@ -6,6 +6,28 @@ import { es } from 'date-fns/locale';
  */
 
 /**
+ * Convierte a Date interpretando la parte de calendario (YYYY-MM-DD) como
+ * medianoche LOCAL, no UTC. El backend guarda fechas de calendario (gasto,
+ * ingreso, cuota, etc.) como medianoche UTC; parsearlas con `parseISO`/`new
+ * Date(str)` y luego formatear en una zona horaria detrás de UTC (p. ej.
+ * America/Guatemala, UTC-6) las corre un día hacia atrás. Esta función evita
+ * ese desfase leyendo año/mes/día directamente del string.
+ * @param {Date|string} date
+ * @returns {Date}
+ */
+export const parseDateOnly = (date) => {
+  if (date instanceof Date) return date;
+  if (typeof date === 'string') {
+    const match = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const [, year, month, day] = match;
+      return new Date(Number(year), Number(month) - 1, Number(day));
+    }
+  }
+  return parseISO(date);
+};
+
+/**
  * Formatear fecha para mostrar
  * @param {Date|string} date - Fecha a formatear
  * @param {string} formatStr - Formato deseado (default: 'dd/MM/yyyy')
@@ -14,7 +36,7 @@ import { es } from 'date-fns/locale';
 export const formatDate = (date, formatStr = 'dd/MM/yyyy') => {
   if (!date) return '';
   try {
-    const dateObj = typeof date === 'string' ? parseISO(date) : date;
+    const dateObj = parseDateOnly(date);
     return format(dateObj, formatStr, { locale: es });
   } catch (error) {
     console.error('Error formateando fecha:', error);
@@ -57,7 +79,7 @@ export const formatDateLong = (date) => {
 export const daysUntil = (date) => {
   if (!date) return null;
   try {
-    const dateObj = typeof date === 'string' ? parseISO(date) : date;
+    const dateObj = parseDateOnly(date);
     return differenceInDays(dateObj, new Date());
   } catch (error) {
     console.error('Error calculando días hasta fecha:', error);
@@ -73,7 +95,7 @@ export const daysUntil = (date) => {
 export const getRelativeTime = (date) => {
   if (!date) return '';
   try {
-    const dateObj = typeof date === 'string' ? parseISO(date) : date;
+    const dateObj = parseDateOnly(date);
     return formatDistanceToNow(dateObj, { addSuffix: true, locale: es });
   } catch (error) {
     console.error('Error obteniendo tiempo relativo:', error);
@@ -87,7 +109,7 @@ export const getRelativeTime = (date) => {
  * @returns {Date} Primer día del mes
  */
 export const getStartOfMonth = (date) => {
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const dateObj = parseDateOnly(date);
   return startOfMonth(dateObj);
 };
 
@@ -97,7 +119,7 @@ export const getStartOfMonth = (date) => {
  * @returns {Date} Último día del mes
  */
 export const getEndOfMonth = (date) => {
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const dateObj = parseDateOnly(date);
   return endOfMonth(dateObj);
 };
 
@@ -108,7 +130,7 @@ export const getEndOfMonth = (date) => {
  * @returns {Date} Nueva fecha
  */
 export const addMonthsToDate = (date, months) => {
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const dateObj = parseDateOnly(date);
   return addMonths(dateObj, months);
 };
 
@@ -119,7 +141,7 @@ export const addMonthsToDate = (date, months) => {
  * @returns {Date} Nueva fecha
  */
 export const subMonthsFromDate = (date, months) => {
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const dateObj = parseDateOnly(date);
   return subMonths(dateObj, months);
 };
 
@@ -159,7 +181,7 @@ export const getDayName = (day) => {
  */
 export const isToday = (date) => {
   if (!date) return false;
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const dateObj = parseDateOnly(date);
   const today = new Date();
   return format(dateObj, 'yyyy-MM-dd') === format(today, 'yyyy-MM-dd');
 };
@@ -171,7 +193,7 @@ export const isToday = (date) => {
  */
 export const isPast = (date) => {
   if (!date) return false;
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const dateObj = parseDateOnly(date);
   return dateObj < new Date();
 };
 
@@ -182,7 +204,7 @@ export const isPast = (date) => {
  */
 export const isFuture = (date) => {
   if (!date) return false;
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const dateObj = parseDateOnly(date);
   return dateObj > new Date();
 };
 
@@ -206,7 +228,7 @@ export const getCurrentMonthRange = () => {
 export const formatDateForInput = (date) => {
   if (!date) return '';
   try {
-    const dateObj = typeof date === 'string' ? parseISO(date) : date;
+    const dateObj = parseDateOnly(date);
     return format(dateObj, 'yyyy-MM-dd');
   } catch (error) {
     console.error('Error formateando fecha para input:', error);

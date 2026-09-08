@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import AuthSlider from './components/AuthSlider'
 import LoadingSpinner from './components/LoadingSpinner'
 import PageTransition from './components/PageTransition'
+import NotificationContainer from './components/NotificationContainer'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
 import UserSettings from './pages/UserSettings'
@@ -46,7 +47,7 @@ function RootRedirectWhenUnauthenticated() {
 }
 
 function App() {
-  const { isAuthenticated, isLoading } = useAuthContext()
+  const { isAuthenticated, isLoading, notifications, removeNotification } = useAuthContext()
 
   if (isLoading) {
     return <LoadingSpinner />
@@ -55,6 +56,7 @@ function App() {
   return (
     <>
       <ScrollToTop />
+      <NotificationContainer notifications={notifications} onRemove={removeNotification} />
       <Routes>
       {/* Rutas públicas */}
       <Route

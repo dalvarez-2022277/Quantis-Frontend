@@ -53,6 +53,10 @@ const CuotasContent = () => {
   const [showDeletePlanConfirm, setShowDeletePlanConfirm] = useState(null);
   const [planDeleteLoading, setPlanDeleteLoading] = useState(false);
   const [planDeleteError, setPlanDeleteError] = useState(null);
+  const [showPagarConfirm, setShowPagarConfirm] = useState(null);
+  const [pagarSinDebitar, setPagarSinDebitar] = useState(false);
+  const [pagarLoading, setPagarLoading] = useState(false);
+  const [pagarError, setPagarError] = useState(null);
   const [showPlanFormModal, setShowPlanFormModal] = useState(false);
   const [editingPlanId, setEditingPlanId] = useState(null);
   const [editingPlanSnapshot, setEditingPlanSnapshot] = useState(null);
@@ -221,6 +225,32 @@ const CuotasContent = () => {
       setPlanDeleteError(msg);
     } finally {
       setPlanDeleteLoading(false);
+    }
+  };
+
+  const handlePagarCuota = async () => {
+    const plan = showPagarConfirm;
+    const planId = plan?._id;
+    if (!planId) return;
+    setPagarLoading(true);
+    setPagarError(null);
+    try {
+      const res = await cuotaService.pagarCuota(planId, pagarSinDebitar ? { sinDebitar: true } : {});
+      const cuotaActualizada = res?.data?.cuota || res?.cuota;
+      setShowPagarConfirm(null);
+      setPagarSinDebitar(false);
+      if (cuotaActualizada) {
+        setShowPlanDetails((prev) =>
+          prev && prev._id === planId ? cuotaActualizada : prev
+        );
+      }
+      await loadData();
+    } catch (err) {
+      const data = err?.response?.data;
+      const msg = data?.message || (typeof err?.message === 'string' ? err.message : null) || 'No se pudo registrar el pago. Intenta de nuevo.';
+      setPagarError(msg);
+    } finally {
+      setPagarLoading(false);
     }
   };
 
@@ -846,12 +876,57 @@ const CuotasContent = () => {
                   )}
                 </div>
               </div>
+
+              {showPlanDetails.estado !== 'pagada' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setPagarError(null); setPagarSinDebitar(false); setShowPagarConfirm(showPlanDetails); }}
+                    className="mt-4 w-full rounded-xl bg-q-income py-3 text-sm font-semibold text-white transition-colors hover:opacity-90 active:opacity-80"
+                  >
+                    Marcar cuota como pagada
+                    {' · '}
+                    {formatCurrency(
+                      Math.min(showPlanDetails.montoPendiente ?? showPlanDetails.montoCuota, showPlanDetails.montoCuota),
+                      showPlanDetails.moneda
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setPagarError(null); setPagarSinDebitar(true); setShowPagarConfirm(showPlanDetails); }}
+                    className="mt-2 w-full rounded-xl border border-gray-200 dark:border-gray-600 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:border-q-income hover:text-q-income transition-colors"
+                  >
+                    Ya la pagué antes de usar la app: marcar como pagada sin debitar de mi cuenta
+                  </button>
+                </>
+              )}
+
               <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
                 Para editar o eliminar el plan, desliza la fila en la lista o usa la flecha a la derecha, igual que en Gastos.
               </p>
             </div>
           )}
         </FloatingModal>
+
+        <ConfirmModal
+          isOpen={!!showPagarConfirm}
+          onClose={() => { if (!pagarLoading) { setShowPagarConfirm(null); setPagarError(null); setPagarSinDebitar(false); } }}
+          onConfirm={handlePagarCuota}
+          title={pagarSinDebitar ? '¿Marcar como pagada sin debitar?' : '¿Registrar este pago?'}
+          message={
+            showPagarConfirm
+              ? pagarSinDebitar
+                ? `Se marcará la cuota ${(showPagarConfirm.cuotasPagadas || 0) + 1} de ${showPagarConfirm.cuotasTotal} de «${(showPagarConfirm.nombre && showPagarConfirm.nombre.trim()) || 'este plan'}» como pagada, pero NO se creará ningún gasto ni se descontará de tus cuentas. Úsalo solo si ya la pagaste antes de empezar a usar la app.${pagarError ? ` ${pagarError}` : ''}`
+                : `Se registrará el pago de la cuota ${(showPagarConfirm.cuotasPagadas || 0) + 1} de ${showPagarConfirm.cuotasTotal} de «${(showPagarConfirm.nombre && showPagarConfirm.nombre.trim()) || 'este plan'}» por ${formatCurrency(Math.min(showPagarConfirm.montoPendiente ?? showPagarConfirm.montoCuota, showPagarConfirm.montoCuota), showPagarConfirm.moneda)}, y se creará el gasto correspondiente en Gastos.${pagarError ? ` ${pagarError}` : ''}`
+              : ''
+          }
+          confirmText={pagarLoading ? 'Registrando...' : pagarSinDebitar ? 'Marcar como pagada' : 'Registrar pago'}
+          cancelText="Cancelar"
+          variant="success"
+          confirmDisabled={pagarLoading}
+          showIcon={false}
+          elevated
+        />
 
         {/* Modal editar plan — mismo layout que “Nuevo gasto” en modo Gasto en cuotas */}
         <FloatingModal

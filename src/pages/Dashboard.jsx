@@ -633,7 +633,15 @@ const Dashboard = () => {
       { value: totalIngresos, name: 'Ingresos', itemStyle: { color: chartColors.income } },
       { value: totalGastos, name: 'Gastos', itemStyle: { color: chartColors.expense } }
     ].filter(d => d.value > 0);
-    const data = pieData.length ? pieData : [{ value: 1, name: 'Sin datos', itemStyle: { color: '#9ca3af' } }];
+    // Sin ingresos ni gastos este mes: un solo segmento gris que cubre el 100%
+    // del anillo es visualmente indistinguible de un spinner cargando para
+    // siempre. En pie/dona mostramos el estado vacío real de ChartContainer
+    // (no hay nada que graficar); en barras, barras en cero sí comunican bien.
+    const data = pieData;
+
+    if (resumenChartType !== 'bar' && data.length === 0) {
+      return null;
+    }
 
     if (resumenChartType === 'bar') {
       const grid = isNarrow
@@ -1655,6 +1663,7 @@ const Dashboard = () => {
                 option={resumenIngresosGastosOption}
                 title=""
                 loading={false}
+                emptyMessage="Aún no hay movimientos este mes"
                 height={isNarrow ? '280px' : '300px'}
                 compact
                 headerAction={

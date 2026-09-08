@@ -2,6 +2,7 @@ import React, { createContext, useContext, useMemo, useState, useEffect } from '
 import { useAuth } from '../hooks/useAuth';
 import { useLogin } from '../hooks/useLogin';
 import { useNotifications } from '../hooks/useNotifications';
+import { useDueReminders } from '../hooks/useDueReminders';
 import { usePersistence } from './PersistenceContext';
 
 // El contexto ahora solo actúa como un wrapper para los hooks
@@ -24,6 +25,7 @@ export const AuthProvider = ({ children }) => {
   const notifications = useNotifications();
   const persistence = usePersistence();
   const login = useLogin(notifications.showSuccess, notifications.showError, auth.setAuthData);
+  useDueReminders(auth.isAuthenticated, notifications, notifications.notifications);
 
   // Estado para configuraciones
   const [settings, setSettings] = useState(() => {

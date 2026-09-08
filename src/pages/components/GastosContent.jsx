@@ -1431,6 +1431,22 @@ const GastosContent = () => {
                     <p className="text-sm text-gray-700 dark:text-gray-300 break-words">{g.descripcion}</p>
                   </div>
                 )}
+                <div className="mt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { setShowDetails(null); handleEdit(g); }}
+                    className="flex-1 rounded-xl border border-gray-200 dark:border-gray-600 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/60 transition-colors"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowDetails(null); confirmDelete(g); }}
+                    className="flex-1 rounded-xl bg-q-expense-muted py-3 text-sm font-semibold text-q-expense hover:opacity-80 transition-opacity"
+                  >
+                    Eliminar
+                  </button>
+                </div>
               </div>
             );
           })()}

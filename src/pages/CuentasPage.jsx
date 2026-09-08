@@ -6,6 +6,7 @@ import SwipeableTransaction from '../components/SwipeableTransaction';
 import FloatingModal from '../components/FloatingModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { getRelativeTime } from '../utils/dateUtils';
+import { formatCurrency } from '../utils/currencyUtils';
 import { useAuthContext } from '../contexts/AuthContext';
 import {
   ArrowLeftIcon,
@@ -31,6 +32,7 @@ const CuentasPage = ({ embedded = false }) => {
   const isDesktopModal = windowWidth >= 1280;
 
   const [cuentas, setCuentas] = useState([]);
+  const [balancesByCuenta, setBalancesByCuenta] = useState({});
   const [bootstrapping, setBootstrapping] = useState(true);
   const [pageError, setPageError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -41,6 +43,7 @@ const CuentasPage = ({ embedded = false }) => {
   const [formData, setFormData] = useState({
     nombre: '',
     moneda: 'GTQ',
+    saldoInicial: '',
     esPredeterminada: false
   });
   const [formError, setFormError] = useState(null);
@@ -55,10 +58,19 @@ const CuentasPage = ({ embedded = false }) => {
     setPageError(null);
     if (firstFetchRef.current) setBootstrapping(true);
     try {
-      const res = await cuentaService.getCuentas({ esActiva: 'true' });
+      const [res, balancesRes] = await Promise.all([
+        cuentaService.getCuentas({ esActiva: 'true' }),
+        cuentaService.getBalances().catch(() => ({ data: { balances: [] } }))
+      ]);
       const list = parseCuentasResponse(res);
       setCuentas(list);
       setHasAnyAccount(list.length > 0);
+      const balances = balancesRes?.data?.balances || balancesRes?.balances || [];
+      const byCuenta = {};
+      balances.forEach((b) => {
+        if (b.cuentaId) byCuenta[b.cuentaId] = b.balance;
+      });
+      setBalancesByCuenta(byCuenta);
     } catch (e) {
       setPageError(e?.message || 'No se pudieron cargar las cuentas');
       setCuentas([]);
@@ -124,7 +136,7 @@ const CuentasPage = ({ embedded = false }) => {
 
   const openNew = () => {
     setEditing(null);
-    setFormData({ nombre: '', moneda: 'GTQ', esPredeterminada: false });
+    setFormData({ nombre: '', moneda: 'GTQ', saldoInicial: '', esPredeterminada: false });
     setFormError(null);
     setShowForm(true);
   };
@@ -134,6 +146,7 @@ const CuentasPage = ({ embedded = false }) => {
     setFormData({
       nombre: c.nombre || '',
       moneda: c.moneda || 'GTQ',
+      saldoInicial: c.saldoInicial ? String(c.saldoInicial) : '',
       esPredeterminada: user?.cuentaDefault === c._id
     });
     setFormError(null);
@@ -160,17 +173,20 @@ const CuentasPage = ({ embedded = false }) => {
     }
     setSaving(true);
     try {
+      const saldoInicial = formData.saldoInicial === '' ? 0 : Number(formData.saldoInicial);
       let cuentaId;
       if (editing) {
         await cuentaService.updateCuenta(editing._id, {
           nombre,
-          moneda: formData.moneda
+          moneda: formData.moneda,
+          saldoInicial
         });
         cuentaId = editing._id;
       } else {
         const res = await cuentaService.createCuenta({
           nombre,
-          moneda: formData.moneda
+          moneda: formData.moneda,
+          saldoInicial
         });
         const cuenta = res?.data?.cuenta ?? res?.cuenta;
         cuentaId = cuenta?._id;
@@ -360,6 +376,25 @@ const CuentasPage = ({ embedded = false }) => {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
+                    Saldo inicial (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*\.?[0-9]*"
+                    value={formData.saldoInicial}
+                    onChange={(e) =>
+                      setFormData({ ...formData, saldoInicial: e.target.value })
+                    }
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-base min-h-[48px] focus:ring-2 focus:ring-q-primary"
+                    placeholder="0.00"
+                  />
+                  <p className="mt-1.5 ml-1 text-xs text-gray-400 dark:text-gray-500">
+                    Cuánto ya tenías en esta cuenta antes de empezar a registrar movimientos en Quantis.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
                     Predeterminada
                   </label>
                   <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/40 p-3 rounded-xl border border-gray-100 dark:border-gray-800 h-[48px]">
@@ -469,6 +504,7 @@ const CuentasPage = ({ embedded = false }) => {
                   }
                   const subline = `Moneda ${c.moneda || 'GTQ'}`;
                   const esFavorita = user?.cuentaDefault === c._id;
+                  const balance = balancesByCuenta[c._id] ?? 0;
                   return (
                     <li key={c._id}>
                       <SwipeableTransaction
@@ -522,11 +558,11 @@ const CuentasPage = ({ embedded = false }) => {
                           </div>
                           <div className="flex-shrink-0 ml-auto flex items-center gap-2 text-right">
                             <div className="flex flex-col items-end">
-                              <span className="font-semibold tabular-nums text-q-primary">
-                                {c.moneda}
+                              <span className={`font-semibold tabular-nums ${balance < 0 ? 'text-q-expense' : 'text-q-primary'}`}>
+                                {formatCurrency(balance, c.moneda)}
                               </span>
                               <span className="text-[10px] text-gray-400 dark:text-gray-500 uppercase">
-                                cuenta
+                                {c.moneda}
                               </span>
                             </div>
                             <button
@@ -585,6 +621,7 @@ const CuentasPage = ({ embedded = false }) => {
           {showDetails &&
             (() => {
               const c = showDetails;
+              const balance = balancesByCuenta[c._id] ?? 0;
               const DetailRow = ({ label: rowLabel, value, className = '' }) =>
                 value != null && value !== '' ? (
                   <div
@@ -617,12 +654,18 @@ const CuentasPage = ({ embedded = false }) => {
                       <p className="text-lg font-bold text-gray-900 dark:text-white truncate">
                         {c.nombre}
                       </p>
-                      <p className="text-xl font-bold text-q-primary">{c.moneda}</p>
+                      <p className={`text-xl font-bold ${balance < 0 ? 'text-q-expense' : 'text-q-primary'}`}>
+                        {formatCurrency(balance, c.moneda)}
+                      </p>
                     </div>
                   </div>
                   <div className="rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50/50 dark:bg-gray-800/30 overflow-hidden text-sm">
                     <div className="px-4">
                       <DetailRow label="Moneda" value={c.moneda || 'GTQ'} />
+                      <DetailRow
+                        label="Saldo inicial"
+                        value={formatCurrency(c.saldoInicial || 0, c.moneda)}
+                      />
                       {c.createdAt && (
                         <DetailRow
                           label="Registrado"
