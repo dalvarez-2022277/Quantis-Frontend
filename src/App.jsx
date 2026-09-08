@@ -1,13 +1,12 @@
 import React, { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Toaster } from 'sileo'
-import 'sileo/styles.css'
 import { useAuthContext } from './contexts/AuthContext'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import AuthSlider from './components/AuthSlider'
 import LoadingSpinner from './components/LoadingSpinner'
 import PageTransition from './components/PageTransition'
+import NotificationContainer from './components/NotificationContainer'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
 import UserSettings from './pages/UserSettings'
@@ -48,7 +47,7 @@ function RootRedirectWhenUnauthenticated() {
 }
 
 function App() {
-  const { isAuthenticated, isLoading } = useAuthContext()
+  const { isAuthenticated, isLoading, notifications, removeNotification } = useAuthContext()
 
   if (isLoading) {
     return <LoadingSpinner />
@@ -57,11 +56,7 @@ function App() {
   return (
     <>
       <ScrollToTop />
-      <Toaster
-        position="top-center"
-        theme="system"
-        offset={{ top: 'calc(env(safe-area-inset-top) + 10px)' }}
-      />
+      <NotificationContainer notifications={notifications} onRemove={removeNotification} />
       <Routes>
       {/* Rutas públicas */}
       <Route

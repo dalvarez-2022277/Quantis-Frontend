@@ -8,7 +8,7 @@ import { compressForAvatar, validateImage, getImageInfo } from '../utils/imageCo
 
 const Profile = React.memo(() => {
   const navigate = useNavigate();
-  const { user, updateProfile, uploadAvatar, deleteAvatar, error, clearError, showSuccess, showError, imageTimestamp } = useAuthContext();
+  const { user, updateProfile, uploadAvatar, deleteAvatar, error, clearError, showError, imageTimestamp } = useAuthContext();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -73,7 +73,6 @@ const Profile = React.memo(() => {
         if (response.success) {
           setPreviewImage(response.data.user.profileImage);
           setProfileImage(null);
-          showSuccess('Imagen actualizada', 'Tu foto de perfil se ha actualizado correctamente');
         } else {
           showError('Error al subir imagen', response.message || 'No se pudo subir la imagen');
         }
@@ -84,7 +83,7 @@ const Profile = React.memo(() => {
         setIsLoading(false);
       }
     }
-  }, [uploadAvatar, showSuccess, showError]);
+  }, [uploadAvatar, showError]);
 
   const removeImage = useCallback(async () => {
     if (!user?.profileImage) return;
@@ -103,8 +102,6 @@ const Profile = React.memo(() => {
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
-        
-        showSuccess('Imagen eliminada', 'La foto de perfil se ha eliminado correctamente');
       } else {
         showError('Error al eliminar imagen', response.message || 'No se pudo eliminar la imagen');
       }
@@ -114,7 +111,7 @@ const Profile = React.memo(() => {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.profileImage, deleteAvatar, showSuccess, showError]);
+  }, [user?.profileImage, deleteAvatar, showError]);
 
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
