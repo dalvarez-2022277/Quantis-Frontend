@@ -9,7 +9,6 @@ export const cleanUserForStorage = (user) => {
     name: user.name,
     email: user.email,
     currency: user.currency,
-    cuentaDefault: user.cuentaDefault,
     profileImage: user.profileImage,
     isEmailVerified: user.isEmailVerified,
     isActive: user.isActive,

@@ -10,6 +10,16 @@ export const cuentaService = {
     }
   },
 
+  /** Cuántos gastos/ingresos se perderían si se elimina esta cuenta (para confirmar antes de borrar) */
+  getMovimientosCount: async (id) => {
+    try {
+      const response = await api.get(`/cuentas/${id}/movimientos-count`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { message: 'Error al contar movimientos de la cuenta' };
+    }
+  },
+
   /** Saldos por cuenta (ingresos − gastos) por moneda; incluye fila sin cuenta */
   getBalances: async () => {
     try {

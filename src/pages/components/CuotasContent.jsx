@@ -5,6 +5,7 @@ import { formatDate as formatDateUtil } from '../../utils/dateUtils';
 import { formatCurrency } from '../../utils/currencyUtils';
 import { cuotaService } from '../../services/cuotaService';
 import { tarjetaService } from '../../services/tarjetaService';
+import { gastoService } from '../../services/gastoService';
 import { useTiposTransaccion } from '../../hooks/useTiposTransaccion';
 import { getIconComponent, ICON_KEYS_FOR_PICKER, normalizeIconKey } from '../../utils/iconRegistry';
 import FloatingModal from '../../components/FloatingModal';
@@ -26,6 +27,86 @@ import {
 
 const TARJETAS_PER_PAGE = 15;
 
+// Fecha de hoy en YYYY-MM-DD (día local, no UTC) para prellenar inputs type="date".
+const getCurrentDateStr = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+/** Deuda total + gasto por ciclo de corte de una tarjeta (cuotas + gastos sueltos). */
+const TarjetaResumenDeuda = ({ estado, moneda, onRegistrarPago }) => {
+  if (!estado || estado.loading) {
+    return (
+      <div className="px-4 sm:px-6 pt-4 pb-2">
+        <div className="h-16 rounded-xl bg-gray-100 dark:bg-gray-700/50 animate-pulse" />
+      </div>
+    );
+  }
+  if (estado.error || !estado.data) {
+    return null;
+  }
+  const { deudaTotal, disponible, cicloActual } = estado.data;
+
+  return (
+    <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-100 dark:border-gray-700">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 mb-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500 font-semibold">
+            Debes en total
+          </p>
+          <p className="text-xl font-bold text-gray-900 dark:text-white tabular-nums">
+            {formatCurrency(deudaTotal, moneda)}
+          </p>
+        </div>
+        {disponible != null && (
+          <div className="text-right">
+            <p className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500 font-semibold">
+              Disponible
+            </p>
+            <p className="text-sm font-semibold text-gray-600 dark:text-gray-300 tabular-nums">
+              {formatCurrency(disponible, moneda)}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {cicloActual && (
+        <div className="mb-3">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">
+            Corte: {formatDateUtil(cicloActual.fin, 'dd MMM')}
+            {cicloActual.fechaPago && ` · Pago: ${formatDateUtil(cicloActual.fechaPago, 'dd MMM')}`}
+          </p>
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums">
+              Debes {formatCurrency(cicloActual.total, moneda)}
+              {cicloActual.fechaPago && ` para el ${formatDateUtil(cicloActual.fechaPago, 'dd MMM')}`}
+            </span>
+          </div>
+          {cicloActual.cuotas > 0 && cicloActual.sueltos > 0 && (
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+              {formatCurrency(cicloActual.cuotas, moneda)} en cuotas + {formatCurrency(cicloActual.sueltos, moneda)} en compras sueltas
+            </p>
+          )}
+        </div>
+      )}
+
+
+      {deudaTotal > 0 && onRegistrarPago && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onRegistrarPago(); }}
+          className="w-full rounded-lg border border-q-expense-muted text-q-expense text-xs font-semibold py-2 hover:bg-q-expense-muted transition-colors"
+        >
+          Registrar pago a esta tarjeta
+        </button>
+      )}
+    </div>
+  );
+};
+
 const CuotasContent = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -39,6 +120,11 @@ const CuotasContent = () => {
   const [deleteTarjetaError, setDeleteTarjetaError] = useState(null);
   const [showPlanDetails, setShowPlanDetails] = useState(null);
   const [expandedTarjetaId, setExpandedTarjetaId] = useState(null);
+  const [resumenTarjetas, setResumenTarjetas] = useState({}); // { [tarjetaId]: { loading, data, error } }
+  const [showPagoTarjetaModal, setShowPagoTarjetaModal] = useState(null); // tarjeta object o null
+  const [pagoTarjetaForm, setPagoTarjetaForm] = useState({ monto: '', fecha: getCurrentDateStr(), descripcion: '' });
+  const [pagoTarjetaLoading, setPagoTarjetaLoading] = useState(false);
+  const [pagoTarjetaError, setPagoTarjetaError] = useState(null);
   const [showTarjetaModal, setShowTarjetaModal] = useState(false);
   const [tarjetaFormData, setTarjetaFormData] = useState({
     nombre: '',
@@ -53,6 +139,10 @@ const CuotasContent = () => {
   const [showDeletePlanConfirm, setShowDeletePlanConfirm] = useState(null);
   const [planDeleteLoading, setPlanDeleteLoading] = useState(false);
   const [planDeleteError, setPlanDeleteError] = useState(null);
+  const [showPagarConfirm, setShowPagarConfirm] = useState(null);
+  const [pagarSinDebitar, setPagarSinDebitar] = useState(false);
+  const [pagarLoading, setPagarLoading] = useState(false);
+  const [pagarError, setPagarError] = useState(null);
   const [showPlanFormModal, setShowPlanFormModal] = useState(false);
   const [editingPlanId, setEditingPlanId] = useState(null);
   const [editingPlanSnapshot, setEditingPlanSnapshot] = useState(null);
@@ -89,6 +179,42 @@ const CuotasContent = () => {
       setIsLoading(false);
     }
   }, []);
+
+  // Chips de categoría (built-in + creadas por el usuario + de esta sesión),
+  // ordenados por cuántos planes de cuotas existen con cada una (la más usada
+  // primero). `planes` ya trae el historial completo (getCuotas no pagina),
+  // así que el conteo se calcula localmente sin llamada extra al backend.
+  const categoriaChipsCuota = useMemo(() => {
+    const builtIns = [
+      { kind: 'builtin', value: 'alimentacion', label: 'Alimentación', Icon: ShoppingCartIcon },
+      { kind: 'builtin', value: 'transporte', label: 'Transporte', Icon: TruckIcon },
+      { kind: 'builtin', value: 'otros', label: 'Otros', Icon: EllipsisHorizontalCircleIcon }
+    ];
+    const custom = (tiposGasto || [])
+      .filter(t => (t.id != null || t._id != null) && !['alimentacion', 'transporte', 'otros'].includes((t.slug || '').toLowerCase()))
+      .map(t => ({
+        kind: 'custom',
+        value: t.label || t.slug,
+        label: t.label,
+        catId: t.id ?? t._id,
+        Icon: getIconComponent(normalizeIconKey(t.iconKey, 'ShoppingCartIcon'))
+      }));
+    const session = (sessionTiposCategoriaCuota || []).map(t => ({
+      kind: 'session',
+      value: t.label,
+      label: t.label,
+      sessionId: t.sessionId,
+      Icon: getIconComponent(normalizeIconKey(t.iconKey, 'ShoppingCartIcon'))
+    }));
+    const conteo = {};
+    (planes || []).forEach((p) => {
+      if (!p.categoria) return;
+      conteo[p.categoria] = (conteo[p.categoria] || 0) + 1;
+    });
+    return [...builtIns, ...custom, ...session]
+      .map((item, idx) => ({ ...item, _count: conteo[item.value] || 0, _idx: idx }))
+      .sort((a, b) => b._count - a._count || a._idx - b._idx);
+  }, [tiposGasto, sessionTiposCategoriaCuota, planes]);
 
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth);
@@ -136,6 +262,22 @@ const CuotasContent = () => {
     setShowPlanDetails(plan);
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.state?.openPlanId, planes, location.pathname, navigate]);
+
+  // Al expandir una tarjeta, cargar su deuda total y ciclo de corte actual (una sola vez por tarjeta).
+  useEffect(() => {
+    const tid = expandedTarjetaId;
+    if (!tid || tid === 'sin-tarjeta') return;
+    if (resumenTarjetas[tid]) return; // ya cargado o cargando
+    setResumenTarjetas((prev) => ({ ...prev, [tid]: { loading: true, data: null, error: null } }));
+    tarjetaService.getResumenTarjeta(tid, { ciclos: 4 })
+      .then((res) => {
+        const data = res?.data || res;
+        setResumenTarjetas((prev) => ({ ...prev, [tid]: { loading: false, data, error: null } }));
+      })
+      .catch(() => {
+        setResumenTarjetas((prev) => ({ ...prev, [tid]: { loading: false, data: null, error: 'No se pudo cargar el resumen' } }));
+      });
+  }, [expandedTarjetaId, resumenTarjetas]);
 
   const openTarjetaModal = () => {
     setEditingTarjeta(null);
@@ -224,6 +366,79 @@ const CuotasContent = () => {
     }
   };
 
+  const handlePagarCuota = async () => {
+    const plan = showPagarConfirm;
+    const planId = plan?._id;
+    if (!planId) return;
+    setPagarLoading(true);
+    setPagarError(null);
+    try {
+      const res = await cuotaService.pagarCuota(planId, pagarSinDebitar ? { sinDebitar: true } : {});
+      const cuotaActualizada = res?.data?.cuota || res?.cuota;
+      setShowPagarConfirm(null);
+      setPagarSinDebitar(false);
+      if (cuotaActualizada) {
+        setShowPlanDetails((prev) =>
+          prev && prev._id === planId ? cuotaActualizada : prev
+        );
+      }
+      await loadData();
+    } catch (err) {
+      const data = err?.response?.data;
+      const msg = data?.message || (typeof err?.message === 'string' ? err.message : null) || 'No se pudo registrar el pago. Intenta de nuevo.';
+      setPagarError(msg);
+    } finally {
+      setPagarLoading(false);
+    }
+  };
+
+  const abrirPagoTarjetaModal = (tarjeta, deudaTotal) => {
+    setPagoTarjetaError(null);
+    setPagoTarjetaForm({
+      monto: deudaTotal > 0 ? String(deudaTotal) : '',
+      fecha: getCurrentDateStr(),
+      descripcion: ''
+    });
+    setShowPagoTarjetaModal(tarjeta);
+  };
+
+  const handleRegistrarPagoTarjeta = async () => {
+    const tarjeta = showPagoTarjetaModal;
+    if (!tarjeta?._id) return;
+    const monto = parseFloat(String(pagoTarjetaForm.monto).replace(/,/g, ''));
+    if (!monto || monto <= 0) {
+      setPagoTarjetaError('Ingresa un monto válido.');
+      return;
+    }
+    setPagoTarjetaLoading(true);
+    setPagoTarjetaError(null);
+    try {
+      await gastoService.createGasto({
+        categoria: 'otros',
+        monto,
+        moneda: tarjeta.moneda,
+        fecha: pagoTarjetaForm.fecha,
+        descripcion: pagoTarjetaForm.descripcion?.trim() || `Pago tarjeta ${tarjeta.nombre || ''}`.trim(),
+        metodoPago: 'efectivo',
+        tarjetaId: tarjeta._id,
+        esPagoTarjeta: true
+      });
+      setShowPagoTarjetaModal(null);
+      // Invalida el resumen cacheado de esta tarjeta para que se recargue con la deuda actualizada.
+      setResumenTarjetas((prev) => {
+        const next = { ...prev };
+        delete next[tarjeta._id];
+        return next;
+      });
+    } catch (err) {
+      const data = err?.response?.data;
+      const msg = data?.message || err?.message || 'No se pudo registrar el pago. Intenta de nuevo.';
+      setPagoTarjetaError(msg);
+    } finally {
+      setPagoTarjetaLoading(false);
+    }
+  };
+
   const openEditPlanModal = (plan) => {
     const catRaw = (plan.categoria || '').trim();
     const categoriasPredefinidas = ['alimentacion', 'transporte', 'otros'];
@@ -290,7 +505,7 @@ const CuotasContent = () => {
       setPlanFormData((prev) => {
         if (!prev) return prev;
         if (prev.categoria === deletedLabel) {
-          return { ...prev, categoria: 'alimentacion', categoriaPersonalizada: '' };
+          return { ...prev, categoria: '', categoriaPersonalizada: '' };
         }
         return prev;
       });
@@ -621,6 +836,13 @@ const CuotasContent = () => {
                     className={expanded ? 'overflow-visible' : 'overflow-hidden'}
                   >
                     <div className="bg-gray-50 dark:bg-gray-800/60 border border-t-0 border-gray-200 dark:border-gray-700 rounded-b-2xl">
+                      {tid !== 'sin-tarjeta' && expanded && (
+                        <TarjetaResumenDeuda
+                          estado={resumenTarjetas[tid]}
+                          moneda={tarjeta?.moneda}
+                          onRegistrarPago={() => abrirPagoTarjetaModal(tarjeta, resumenTarjetas[tid]?.data?.deudaTotal || 0)}
+                        />
+                      )}
                       {planesDeTarjeta.length === 0 ? (
                         <div className="px-4 sm:px-6 py-6 text-center">
                           <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">
@@ -846,9 +1068,127 @@ const CuotasContent = () => {
                   )}
                 </div>
               </div>
+
+              {showPlanDetails.estado !== 'pagada' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setPagarError(null); setPagarSinDebitar(false); setShowPagarConfirm(showPlanDetails); }}
+                    className="mt-4 w-full rounded-xl bg-q-income py-3 text-sm font-semibold text-white transition-colors hover:opacity-90 active:opacity-80"
+                  >
+                    Marcar cuota como pagada
+                    {' · '}
+                    {formatCurrency(
+                      Math.min(showPlanDetails.montoPendiente ?? showPlanDetails.montoCuota, showPlanDetails.montoCuota),
+                      showPlanDetails.moneda
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setPagarError(null); setPagarSinDebitar(true); setShowPagarConfirm(showPlanDetails); }}
+                    className="mt-2 w-full rounded-xl border border-gray-200 dark:border-gray-600 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:border-q-income hover:text-q-income transition-colors"
+                  >
+                    Ya la pagué antes de usar la app: marcar como pagada sin debitar de mi cuenta
+                  </button>
+                </>
+              )}
+
               <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
                 Para editar o eliminar el plan, desliza la fila en la lista o usa la flecha a la derecha, igual que en Gastos.
               </p>
+            </div>
+          )}
+        </FloatingModal>
+
+        <ConfirmModal
+          isOpen={!!showPagarConfirm}
+          onClose={() => { if (!pagarLoading) { setShowPagarConfirm(null); setPagarError(null); setPagarSinDebitar(false); } }}
+          onConfirm={handlePagarCuota}
+          title={pagarSinDebitar ? '¿Marcar como pagada sin debitar?' : '¿Registrar este pago?'}
+          message={
+            showPagarConfirm
+              ? pagarSinDebitar
+                ? `Se marcará la cuota ${(showPagarConfirm.cuotasPagadas || 0) + 1} de ${showPagarConfirm.cuotasTotal} de «${(showPagarConfirm.nombre && showPagarConfirm.nombre.trim()) || 'este plan'}» como pagada, pero NO se creará ningún gasto ni se descontará de tus cuentas. Úsalo solo si ya la pagaste antes de empezar a usar la app.${pagarError ? ` ${pagarError}` : ''}`
+                : `Se registrará el pago de la cuota ${(showPagarConfirm.cuotasPagadas || 0) + 1} de ${showPagarConfirm.cuotasTotal} de «${(showPagarConfirm.nombre && showPagarConfirm.nombre.trim()) || 'este plan'}» por ${formatCurrency(Math.min(showPagarConfirm.montoPendiente ?? showPagarConfirm.montoCuota, showPagarConfirm.montoCuota), showPagarConfirm.moneda)}, y se creará el gasto correspondiente en Gastos.${pagarError ? ` ${pagarError}` : ''}`
+              : ''
+          }
+          confirmText={pagarLoading ? 'Registrando...' : pagarSinDebitar ? 'Marcar como pagada' : 'Registrar pago'}
+          cancelText="Cancelar"
+          variant="success"
+          confirmDisabled={pagarLoading}
+          showIcon={false}
+          elevated
+        />
+
+        <FloatingModal
+          isOpen={!!showPagoTarjetaModal}
+          onClose={() => { if (!pagoTarjetaLoading) setShowPagoTarjetaModal(null); }}
+          size="sm"
+          showCloseButton
+          showDragHandle={!isDesktopModal}
+          closeButtonStyle={isDesktopModal ? 'default' : 'circle'}
+          bottomSheet={!isDesktopModal}
+          title="Registrar pago a la tarjeta"
+          compactHeader
+        >
+          {showPagoTarjetaModal && (
+            <div className="pt-2 px-4 pb-6 sm:px-6 sm:pt-4 space-y-4">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Registra cuánto pagaste de la tarjeta «{showPagoTarjetaModal.nombre}». Esto reduce lo que debes; no vuelve a contarse como gasto nuevo.
+              </p>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
+                  Monto
+                </label>
+                <div className="flex items-baseline gap-2 bg-gray-50 dark:bg-gray-800/40 rounded-2xl p-4 border border-gray-100 dark:border-gray-800">
+                  <span className="text-2xl font-bold text-q-expense flex-shrink-0">
+                    {showPagoTarjetaModal.moneda === 'USD' ? '$' : 'Q'}
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={pagoTarjetaForm.monto}
+                    onChange={(e) => setPagoTarjetaForm((prev) => ({ ...prev, monto: e.target.value }))}
+                    className="flex-1 min-w-0 bg-transparent border-none p-0 text-2xl font-bold text-gray-900 dark:text-white placeholder-gray-300 dark:placeholder-gray-700 focus:ring-0 focus:outline-none"
+                    placeholder="0.00"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
+                  Fecha
+                </label>
+                <input
+                  type="date"
+                  value={pagoTarjetaForm.fecha}
+                  onChange={(e) => setPagoTarjetaForm((prev) => ({ ...prev, fecha: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-q-expense min-h-[48px]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
+                  Nota (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={pagoTarjetaForm.descripcion}
+                  onChange={(e) => setPagoTarjetaForm((prev) => ({ ...prev, descripcion: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-q-expense min-h-[48px]"
+                  placeholder="Ej. Pago mínimo, pago total…"
+                />
+              </div>
+              {pagoTarjetaError && (
+                <p className="text-sm text-q-expense">{pagoTarjetaError}</p>
+              )}
+              <button
+                type="button"
+                onClick={handleRegistrarPagoTarjeta}
+                disabled={pagoTarjetaLoading}
+                className="w-full rounded-xl bg-q-income py-3 text-sm font-semibold text-white transition-colors hover:opacity-90 active:opacity-80 disabled:opacity-60"
+              >
+                {pagoTarjetaLoading ? 'Registrando...' : 'Registrar pago'}
+              </button>
             </div>
           )}
         </FloatingModal>
@@ -927,97 +1267,50 @@ const CuotasContent = () => {
                           Categoría de gasto
                         </label>
                         <div className={`${isDesktopModal ? 'grid grid-cols-2 gap-3' : 'flex gap-3 -mx-2 px-2 overflow-x-auto overflow-y-hidden flex-nowrap'}`} style={!isDesktopModal ? { scrollbarWidth: 'none', msOverflowStyle: 'none' } : undefined}>
-                          {[
-                            { value: 'alimentacion', label: 'Alimentación', Icon: ShoppingCartIcon },
-                            { value: 'transporte', label: 'Transporte', Icon: TruckIcon },
-                            { value: 'otros', label: 'Otros', Icon: EllipsisHorizontalCircleIcon },
-                          ].map(({ value, label, Icon }) => {
-                            const isSelected = planFormData.categoria === value;
-                            return (
-                              <button
-                                key={value}
-                                type="button"
-                                onClick={() => {
-                                  setPlanFormData((prev) => (prev ? { ...prev, categoria: value, categoriaPersonalizada: '' } : prev));
-                                }}
-                                className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense text-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'}`}
-                              >
-                                <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} aria-hidden />
-                                {label}
-                              </button>
-                            );
-                          })}
-                          {(tiposGasto || [])
-                            .filter(
-                              (t) =>
-                                (t.id != null || t._id != null)
-                                && !['alimentacion', 'transporte', 'otros'].includes((t.slug || '').toLowerCase())
-                            )
-                            .map((cat) => {
-                              const value = cat.label || cat.slug;
-                              const catId = cat.id ?? cat._id;
-                              const CatIcon = getIconComponent(normalizeIconKey(cat.iconKey, 'ShoppingCartIcon'));
-                              const isSelected = planFormData.categoria === value;
+                          {categoriaChipsCuota.map((item) => {
+                            const isSelected = planFormData.categoria === item.value;
+                            const Icon = item.Icon;
+                            if (item.kind === 'builtin') {
                               return (
-                                <div
-                                  key={catId ?? value}
-                                  className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}
+                                <button
+                                  key={item.value}
+                                  type="button"
+                                  onClick={() => {
+                                    setPlanFormData((prev) => (prev ? { ...prev, categoria: item.value, categoriaPersonalizada: '' } : prev));
+                                  }}
+                                  className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense text-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'}`}
                                 >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setPlanFormData((prev) => (prev ? { ...prev, categoria: value, categoriaPersonalizada: '' } : prev));
-                                    }}
-                                    className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors"
-                                  >
-                                    {CatIcon && (
-                                      <CatIcon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />
-                                    )}
-                                    <span className={`truncate ${isSelected ? 'text-q-expense' : 'text-gray-600 dark:text-gray-300'}`}>{cat.label}</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setTipoCategoriaCuotaToDelete({ type: 'api', id: catId, label: cat.label });
-                                    }}
-                                    className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0"
-                                    aria-label="Eliminar categoría"
-                                  >
-                                    <TrashIcon className="w-4 h-4 block" />
-                                  </button>
-                                </div>
+                                  <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} aria-hidden />
+                                  {item.label}
+                                </button>
                               );
-                            })}
-                          {sessionTiposCategoriaCuota.map((t) => {
-                            const SIcon = getIconComponent(normalizeIconKey(t.iconKey, 'ShoppingCartIcon'));
-                            const isSelected = planFormData.categoria === t.label;
+                            }
+                            const onDelete =
+                              item.kind === 'custom'
+                                ? () => setTipoCategoriaCuotaToDelete({ type: 'api', id: item.catId, label: item.label })
+                                : () => setTipoCategoriaCuotaToDelete({ type: 'session', sessionId: item.sessionId, label: item.label });
                             return (
                               <div
-                                key={t.sessionId}
+                                key={item.kind === 'custom' ? (item.catId ?? item.value) : item.sessionId}
                                 className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}
                               >
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setPlanFormData((prev) => (prev ? { ...prev, categoria: t.label, categoriaPersonalizada: '' } : prev));
+                                    setPlanFormData((prev) => (prev ? { ...prev, categoria: item.value, categoriaPersonalizada: '' } : prev));
                                   }}
                                   className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors"
                                 >
-                                  {SIcon && (
-                                    <SIcon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />
+                                  {Icon && (
+                                    <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />
                                   )}
-                                  <span className={`truncate ${isSelected ? 'text-q-expense' : 'text-gray-600 dark:text-gray-300'}`}>{t.label}</span>
+                                  <span className={`truncate ${isSelected ? 'text-q-expense' : 'text-gray-600 dark:text-gray-300'}`}>{item.label}</span>
                                 </button>
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setTipoCategoriaCuotaToDelete({
-                                      type: 'session',
-                                      sessionId: t.sessionId,
-                                      label: t.label,
-                                    });
+                                    onDelete();
                                   }}
                                   className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0"
                                   aria-label="Eliminar categoría"
@@ -1078,7 +1371,7 @@ const CuotasContent = () => {
                           type="button"
                           onClick={() => {
                             setNuevaCategoriaCuota({ label: '', iconKey: 'ShoppingCartIcon' });
-                            setPlanFormData((prev) => (prev ? { ...prev, categoria: 'alimentacion', categoriaPersonalizada: '' } : prev));
+                            setPlanFormData((prev) => (prev ? { ...prev, categoria: '', categoriaPersonalizada: '' } : prev));
                             setCategoriaCuotaInlineError(null);
                           }}
                           className="text-sm font-medium text-q-expense hover:underline flex-shrink-0"

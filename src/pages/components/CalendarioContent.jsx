@@ -15,6 +15,9 @@ import { formatCurrency } from '../../utils/currencyUtils';
 import FloatingModal from '../../components/FloatingModal';
 import MonthYearPillNav from '../../components/MonthYearPillNav';
 
+const CATEGORIA_GASTO_LABELS = { alimentacion: 'Alimentación', transporte: 'Transporte', otros: 'Otros' };
+const categoriaGastoLabel = (categoria) => CATEGORIA_GASTO_LABELS[categoria] || categoria;
+
 // Colores: cuota ≠ morado; morado solo pago tarjeta; ingreso verde; gasto rojo
 const TIPOS_CONFIG = {
   ingreso: { label: 'Ingreso', dot: 'bg-q-income', bg: 'bg-q-income-muted', text: 'text-q-income', icon: ArrowTrendingUpIcon },
@@ -59,8 +62,17 @@ function flattenEventosMes(eventosPorDia) {
 }
 
 function montoContableEvento(e) {
-  if (e.tipo === 'tarjeta_pago' && (e.cuotasEnFecha || []).length > 0 && e.totalCuotasEnFecha != null) {
-    return Number(e.totalCuotasEnFecha) || 0;
+  if (e.tipo === 'tarjeta_pago') {
+    // Con ciclo calculado (backend nos da cicloFin): cuotas del día + gastos
+    // sueltos hechos con la tarjeta durante ese ciclo de facturación. Antes
+    // solo se contaban las cuotas y las compras sueltas a crédito quedaban
+    // afuera del total a pagar.
+    if (e.cicloFin != null) {
+      return (Number(e.totalCuotasEnFecha) || 0) + (Number(e.montoSueltosEnCiclo) || 0);
+    }
+    if ((e.cuotasEnFecha || []).length > 0 && e.totalCuotasEnFecha != null) {
+      return Number(e.totalCuotasEnFecha) || 0;
+    }
   }
   return Number(e.monto) || 0;
 }
@@ -522,6 +534,11 @@ const CalendarioContent = () => {
                   if (esPagoTarjeta) {
                     const todasPagadas = evento.todasCuotasPagadas === true;
                     const mostrarComoPagado = todasPagadas || fechaPasada;
+                    // El Total solo se marca "(Pagado)" cuando hay una señal real de pago
+                    // (todas las cuotas marcadas yaPagada) y no hay compras sueltas en el
+                    // ciclo - esas no tienen forma de saber si ya se pagaron o no, así que
+                    // nunca se dan por pagadas solo porque la fecha de pago ya pasó.
+                    const totalMostradoComoPagado = todasPagadas && (evento.cantidadSueltosEnCiclo || 0) === 0;
                     return (
                       <li key={rowKey} className={mostrarComoPagado ? 'opacity-75' : ''}>
                         <div
@@ -546,7 +563,7 @@ const CalendarioContent = () => {
                             </p>
                           </div>
                         </div>
-                        {cuotasEnFecha.length > 0 ? (
+                        {(cuotasEnFecha.length > 0 || Number(evento.montoSueltosEnCiclo) > 0) ? (
                           <div className={`mx-4 mb-3 rounded-xl border overflow-hidden ${mostrarComoPagado ? 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-600' : 'bg-gray-100 dark:bg-gray-700/70 border-gray-200 dark:border-gray-600'}`}>
                             <div className="px-4 py-3 space-y-3">
                               {cuotasEnFecha.map((cuota, idx) => {
@@ -582,12 +599,30 @@ const CalendarioContent = () => {
                                   </div>
                                 );
                               })}
+                              {(evento.sueltosEnCiclo || []).map((suelto, idx) => (
+                                <button
+                                  type="button"
+                                  key={suelto.gastoId || idx}
+                                  onClick={() => navigate('/transacciones/gastos', { state: { openGastoId: suelto.gastoId } })}
+                                  className="w-full flex items-center justify-between gap-4 min-h-[2.75rem] text-left rounded-lg px-1 -mx-1 hover:bg-white/50 dark:hover:bg-gray-800/40 transition-colors"
+                                >
+                                  {/* Sin tachar/"Pagado": una compra suelta no tiene señal real de que
+                                      ya se pagó (a diferencia de una cuota con yaPagada) - la fecha de
+                                      pago de la tarjeta puede haber pasado sin que se haya registrado el pago. */}
+                                  <p className="text-base flex-1 min-w-0 break-words text-gray-800 dark:text-gray-100">
+                                    {suelto.descripcion || categoriaGastoLabel(suelto.categoria) || 'Compra'}
+                                  </p>
+                                  <span className="text-base font-bold tabular-nums shrink-0 text-gray-900 dark:text-white">
+                                    {formatCurrency(suelto.monto, suelto.moneda)}
+                                  </span>
+                                </button>
+                              ))}
                               <div className="flex items-center justify-between gap-4 pt-3 mt-1 border-t-2 border-gray-200 dark:border-gray-600">
-                                <p className={`text-base font-bold ${mostrarComoPagado ? 'text-gray-500 dark:text-gray-400' : 'text-gray-800 dark:text-gray-200'}`}>
-                                  Total {todasPagadas ? '(Pagado)' : ''}
+                                <p className={`text-base font-bold ${totalMostradoComoPagado ? 'text-gray-500 dark:text-gray-400' : 'text-gray-800 dark:text-gray-200'}`}>
+                                  Total {totalMostradoComoPagado ? '(Pagado)' : ''}
                                 </p>
-                                <span className={`text-base font-bold tabular-nums ${mostrarComoPagado ? 'line-through text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-white'}`}>
-                                  {mostrarComoPagado ? '−' : ''}{formatCurrency(totalCuotasEnFecha, evento.moneda)} {evento.moneda || ''}
+                                <span className={`text-base font-bold tabular-nums ${totalMostradoComoPagado ? 'line-through text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-white'}`}>
+                                  {totalMostradoComoPagado ? '−' : ''}{formatCurrency(totalCuotasEnFecha + (Number(evento.montoSueltosEnCiclo) || 0), evento.moneda)} {evento.moneda || ''}
                                 </span>
                               </div>
                             </div>

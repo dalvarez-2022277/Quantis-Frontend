@@ -7,7 +7,11 @@
  */
 export function getPrimeraCuotaFecha(fechaCompraStr, diaPago) {
   if (!fechaCompraStr || !diaPago) return null;
-  const f = new Date(fechaCompraStr);
+  // `new Date("YYYY-MM-DD")` parsea como medianoche UTC; en zonas detrás de UTC
+  // (p. ej. America/Guatemala) eso corre la fecha un día hacia atrás al leer
+  // año/mes/día. Se parsea al mediodía para evitar cruzar la medianoche local.
+  const f = new Date(`${fechaCompraStr}T12:00:00`);
+  f.setHours(0, 0, 0, 0);
   f.setMonth(f.getMonth() + 1);
   const lastDay = new Date(f.getFullYear(), f.getMonth() + 1, 0).getDate();
   f.setDate(Math.min(diaPago, lastDay));

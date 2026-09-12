@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRightOnRectangleIcon } from '@heroicons/react/24/outline';
 
@@ -45,7 +46,7 @@ const ConfirmModal = ({
     if (e.target === e.currentTarget) onClose();
   };
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {/* Cada hijo directo necesita key única (evita "same key ``") */}
       <motion.div
@@ -134,7 +135,8 @@ const ConfirmModal = ({
           </div>
         </div>
       </motion.div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 

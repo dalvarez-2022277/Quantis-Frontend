@@ -732,3 +732,6 @@ html {
 .dark .peer:checked ~ .peer-checked\:bg-q-primary { background-color: var(--q-primary-dark); }
 .dark .peer:checked ~ .peer-checked\:bg-q-income { background-color: var(--q-income-dark); }
 .dark .peer:checked ~ .peer-checked\:bg-q-expense { background-color: var(--q-expense-dark); }
+
+/* Mascota del dashboard: usa @blobatar/react (blobatar/motion.css y
+   blobatar/gaze.css se importan directamente en QuantisMascot.jsx) */

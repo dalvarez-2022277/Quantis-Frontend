@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import AuthSlider from './components/AuthSlider'
 import LoadingSpinner from './components/LoadingSpinner'
 import PageTransition from './components/PageTransition'
+import NotificationContainer from './components/NotificationContainer'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
 import UserSettings from './pages/UserSettings'
@@ -20,6 +21,7 @@ import AboutApp from './pages/AboutApp'
 const TransaccionesPage = lazy(() => import('./pages/TransaccionesPage'))
 const CalendarioPage = lazy(() => import('./pages/CalendarioPage'))
 const FinanzasPage = lazy(() => import('./pages/FinanzasPage'))
+const EstadisticasPage = lazy(() => import('./pages/EstadisticasPage'))
 const AdminFeedback = lazy(() => import('./pages/AdminFeedback'))
 
 const INSTRUCTIONS_SEEN_KEY = 'quantis_instructions_seen'
@@ -46,7 +48,7 @@ function RootRedirectWhenUnauthenticated() {
 }
 
 function App() {
-  const { isAuthenticated, isLoading } = useAuthContext()
+  const { isAuthenticated, isLoading, notifications, removeNotification } = useAuthContext()
 
   if (isLoading) {
     return <LoadingSpinner />
@@ -55,6 +57,7 @@ function App() {
   return (
     <>
       <ScrollToTop />
+      <NotificationContainer notifications={notifications} onRemove={removeNotification} />
       <Routes>
       {/* Rutas públicas */}
       <Route
@@ -143,6 +146,18 @@ function App() {
             <Layout>
               <Suspense fallback={<LoadingSpinner />}>
                 <FinanzasPage />
+              </Suspense>
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/estadisticas"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Suspense fallback={<LoadingSpinner />}>
+                <EstadisticasPage />
               </Suspense>
             </Layout>
           </ProtectedRoute>

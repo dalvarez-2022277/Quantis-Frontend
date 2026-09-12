@@ -42,5 +42,12 @@ export function normalizeGastoPayload(body) {
     if (cid !== undefined) out.cuentaId = cid;
     else delete out.cuentaId;
   }
+  if (out.tarjetaId === null) {
+    /* permitir quitar tarjeta en PUT */
+  } else {
+    const tid = normalizeCuentaId(out.tarjetaId);
+    if (tid !== undefined) out.tarjetaId = tid;
+    else delete out.tarjetaId;
+  }
   return out;
 }

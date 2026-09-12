@@ -6,7 +6,7 @@ import SwipeableTransaction from '../components/SwipeableTransaction';
 import FloatingModal from '../components/FloatingModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { getRelativeTime } from '../utils/dateUtils';
-import { useAuthContext } from '../contexts/AuthContext';
+import { formatCurrency } from '../utils/currencyUtils';
 import {
   ArrowLeftIcon,
   PlusIcon,
@@ -14,7 +14,6 @@ import {
   MagnifyingGlassIcon,
   ChevronRightIcon
 } from '@heroicons/react/24/outline';
-import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 
 function parseCuentasResponse(res) {
   const data = res?.data?.data ?? res?.data ?? res;
@@ -24,13 +23,13 @@ function parseCuentasResponse(res) {
 const CuentasPage = ({ embedded = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, updateProfile } = useAuthContext();
   const [windowWidth, setWindowWidth] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth : 1024
   );
   const isDesktopModal = windowWidth >= 1280;
 
   const [cuentas, setCuentas] = useState([]);
+  const [balancesByCuenta, setBalancesByCuenta] = useState({});
   const [bootstrapping, setBootstrapping] = useState(true);
   const [pageError, setPageError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -41,12 +40,14 @@ const CuentasPage = ({ embedded = false }) => {
   const [formData, setFormData] = useState({
     nombre: '',
     moneda: 'GTQ',
-    esPredeterminada: false
+    saldoInicial: ''
   });
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [showDetails, setShowDetails] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
+  const [deleteMovimientosCount, setDeleteMovimientosCount] = useState(null); // { gastos, ingresos } | null mientras carga
+  const [deleting, setDeleting] = useState(false);
 
   const swipeRefs = useRef({});
   const firstFetchRef = useRef(true);
@@ -55,10 +56,19 @@ const CuentasPage = ({ embedded = false }) => {
     setPageError(null);
     if (firstFetchRef.current) setBootstrapping(true);
     try {
-      const res = await cuentaService.getCuentas({ esActiva: 'true' });
+      const [res, balancesRes] = await Promise.all([
+        cuentaService.getCuentas({ esActiva: 'true' }),
+        cuentaService.getBalances().catch(() => ({ data: { balances: [] } }))
+      ]);
       const list = parseCuentasResponse(res);
       setCuentas(list);
       setHasAnyAccount(list.length > 0);
+      const balances = balancesRes?.data?.balances || balancesRes?.balances || [];
+      const byCuenta = {};
+      balances.forEach((b) => {
+        if (b.cuentaId) byCuenta[b.cuentaId] = b.balance;
+      });
+      setBalancesByCuenta(byCuenta);
     } catch (e) {
       setPageError(e?.message || 'No se pudieron cargar las cuentas');
       setCuentas([]);
@@ -85,8 +95,7 @@ const CuentasPage = ({ embedded = false }) => {
     setEditing(null);
     setFormData({
       nombre: '',
-      moneda: monedaQ === 'USD' || monedaQ === 'GTQ' ? monedaQ : 'GTQ',
-      esPredeterminada: false
+      moneda: monedaQ === 'USD' || monedaQ === 'GTQ' ? monedaQ : 'GTQ'
     });
     setFormError(null);
     setShowForm(true);
@@ -124,7 +133,7 @@ const CuentasPage = ({ embedded = false }) => {
 
   const openNew = () => {
     setEditing(null);
-    setFormData({ nombre: '', moneda: 'GTQ', esPredeterminada: false });
+    setFormData({ nombre: '', moneda: 'GTQ', saldoInicial: '' });
     setFormError(null);
     setShowForm(true);
   };
@@ -134,7 +143,7 @@ const CuentasPage = ({ embedded = false }) => {
     setFormData({
       nombre: c.nombre || '',
       moneda: c.moneda || 'GTQ',
-      esPredeterminada: user?.cuentaDefault === c._id
+      saldoInicial: c.saldoInicial ? String(c.saldoInicial) : ''
     });
     setFormError(null);
     setShowForm(true);
@@ -160,26 +169,19 @@ const CuentasPage = ({ embedded = false }) => {
     }
     setSaving(true);
     try {
-      let cuentaId;
+      const saldoInicial = formData.saldoInicial === '' ? 0 : Number(formData.saldoInicial);
       if (editing) {
         await cuentaService.updateCuenta(editing._id, {
           nombre,
-          moneda: formData.moneda
+          moneda: formData.moneda,
+          saldoInicial
         });
-        cuentaId = editing._id;
       } else {
-        const res = await cuentaService.createCuenta({
+        await cuentaService.createCuenta({
           nombre,
-          moneda: formData.moneda
+          moneda: formData.moneda,
+          saldoInicial
         });
-        const cuenta = res?.data?.cuenta ?? res?.cuenta;
-        cuentaId = cuenta?._id;
-      }
-
-      if (formData.esPredeterminada && cuentaId) {
-        await updateProfile({ cuentaDefaultId: cuentaId });
-      } else if (!formData.esPredeterminada && cuentaId && user?.cuentaDefault === cuentaId) {
-        await updateProfile({ cuentaDefaultId: null });
       }
 
       handleCancel();
@@ -196,26 +198,32 @@ const CuentasPage = ({ embedded = false }) => {
   };
 
   const handleDelete = async (id) => {
+    setDeleting(true);
     try {
       await cuentaService.deleteCuenta(id);
       setShowDeleteConfirm(null);
       setShowDetails(null);
-      if (user?.cuentaDefault === id) {
-        try {
-          await updateProfile({ cuentaDefaultId: null });
-        } catch {
-          /* el backend puede haber limpiado el vínculo; ignorar */
-        }
-      }
+      setDeleteMovimientosCount(null);
       await loadCuentas();
     } catch (e) {
       setPageError(e?.message || 'Error al eliminar la cuenta');
       setShowDeleteConfirm(null);
+      setDeleteMovimientosCount(null);
+    } finally {
+      setDeleting(false);
     }
   };
 
   const confirmDelete = (cuenta) => {
     setShowDeleteConfirm(cuenta);
+    setDeleteMovimientosCount(null); // null = cargando
+    cuentaService
+      .getMovimientosCount(cuenta._id)
+      .then((res) => {
+        const data = res?.data?.data ?? res?.data ?? res;
+        setDeleteMovimientosCount({ gastos: data?.gastos || 0, ingresos: data?.ingresos || 0 });
+      })
+      .catch(() => setDeleteMovimientosCount({ gastos: 0, ingresos: 0, error: true }));
   };
 
   if (bootstrapping) {
@@ -360,27 +368,22 @@ const CuentasPage = ({ embedded = false }) => {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
-                    Predeterminada
+                    Saldo inicial (opcional)
                   </label>
-                  <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/40 p-3 rounded-xl border border-gray-100 dark:border-gray-800 h-[48px]">
-                    <span className="text-sm font-medium text-gray-500">
-                      Por defecto
-                    </span>
-                    <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                      <input
-                        type="checkbox"
-                        checked={formData.esPredeterminada}
-                        onChange={() =>
-                          setFormData({
-                            ...formData,
-                            esPredeterminada: !formData.esPredeterminada
-                          })
-                        }
-                        className="sr-only peer"
-                      />
-                      <div className="relative w-9 h-5 flex-shrink-0 bg-gray-200 rounded-full peer-checked:bg-q-primary after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow after:transition-all peer-checked:after:translate-x-4" />
-                    </label>
-                  </div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*\.?[0-9]*"
+                    value={formData.saldoInicial}
+                    onChange={(e) =>
+                      setFormData({ ...formData, saldoInicial: e.target.value })
+                    }
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-base min-h-[48px] focus:ring-2 focus:ring-q-primary"
+                    placeholder="0.00"
+                  />
+                  <p className="mt-1.5 ml-1 text-xs text-gray-400 dark:text-gray-500">
+                    Cuánto ya tenías en esta cuenta antes de empezar a registrar movimientos en Quantis.
+                  </p>
                 </div>
               </div>
 
@@ -468,7 +471,7 @@ const CuentasPage = ({ embedded = false }) => {
                     swipeRefs.current[c._id] = React.createRef();
                   }
                   const subline = `Moneda ${c.moneda || 'GTQ'}`;
-                  const esFavorita = user?.cuentaDefault === c._id;
+                  const balance = balancesByCuenta[c._id] ?? 0;
                   return (
                     <li key={c._id}>
                       <SwipeableTransaction
@@ -492,7 +495,7 @@ const CuentasPage = ({ embedded = false }) => {
                           }}
                           className="w-full flex items-center gap-3 py-3.5 pl-4 pr-0 text-left hover:bg-gray-100/80 dark:hover:bg-gray-700/40 active:bg-gray-200/80 dark:active:bg-gray-700/60 transition-colors touch-manipulation cursor-pointer"
                         >
-                          <span className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-q-primary-muted text-q-primary">
+                          <span className="relative flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-q-primary-muted text-q-primary">
                             <BuildingLibraryIcon
                               className="w-5 h-5"
                               aria-hidden
@@ -500,21 +503,9 @@ const CuentasPage = ({ embedded = false }) => {
                           </span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 min-w-0">
-                              <p className="font-medium text-gray-900 dark:text-white truncate">
+                              <p className="text-base font-semibold text-gray-900 dark:text-white truncate">
                                 {c.nombre}
                               </p>
-                              {esFavorita && (
-                                <span
-                                  className="inline-flex shrink-0"
-                                  title="Cuenta predeterminada"
-                                  aria-label="Cuenta predeterminada"
-                                >
-                                  <StarIconSolid
-                                    className="h-4 w-4 text-q-primary drop-shadow-sm"
-                                    aria-hidden
-                                  />
-                                </span>
-                              )}
                             </div>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
                               {subline}
@@ -522,11 +513,11 @@ const CuentasPage = ({ embedded = false }) => {
                           </div>
                           <div className="flex-shrink-0 ml-auto flex items-center gap-2 text-right">
                             <div className="flex flex-col items-end">
-                              <span className="font-semibold tabular-nums text-q-primary">
-                                {c.moneda}
+                              <span className={`font-semibold tabular-nums ${balance < 0 ? 'text-q-expense' : 'text-q-primary'}`}>
+                                {formatCurrency(balance, c.moneda)}
                               </span>
                               <span className="text-[10px] text-gray-400 dark:text-gray-500 uppercase">
-                                cuenta
+                                {c.moneda}
                               </span>
                             </div>
                             <button
@@ -585,6 +576,7 @@ const CuentasPage = ({ embedded = false }) => {
           {showDetails &&
             (() => {
               const c = showDetails;
+              const balance = balancesByCuenta[c._id] ?? 0;
               const DetailRow = ({ label: rowLabel, value, className = '' }) =>
                 value != null && value !== '' ? (
                   <div
@@ -617,12 +609,18 @@ const CuentasPage = ({ embedded = false }) => {
                       <p className="text-lg font-bold text-gray-900 dark:text-white truncate">
                         {c.nombre}
                       </p>
-                      <p className="text-xl font-bold text-q-primary">{c.moneda}</p>
+                      <p className={`text-xl font-bold ${balance < 0 ? 'text-q-expense' : 'text-q-primary'}`}>
+                        {formatCurrency(balance, c.moneda)}
+                      </p>
                     </div>
                   </div>
                   <div className="rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50/50 dark:bg-gray-800/30 overflow-hidden text-sm">
                     <div className="px-4">
                       <DetailRow label="Moneda" value={c.moneda || 'GTQ'} />
+                      <DetailRow
+                        label="Saldo inicial"
+                        value={formatCurrency(c.saldoInicial || 0, c.moneda)}
+                      />
                       {c.createdAt && (
                         <DetailRow
                           label="Registrado"
@@ -638,20 +636,34 @@ const CuentasPage = ({ embedded = false }) => {
 
         <ConfirmModal
           isOpen={!!showDeleteConfirm}
-          onClose={() => setShowDeleteConfirm(null)}
+          onClose={() => { if (!deleting) { setShowDeleteConfirm(null); setDeleteMovimientosCount(null); } }}
           onConfirm={() =>
             showDeleteConfirm && handleDelete(showDeleteConfirm._id)
           }
           title="¿Eliminar cuenta?"
           message={
             showDeleteConfirm
-              ? `Se eliminará: ${showDeleteConfirm.nombre} — ${showDeleteConfirm.moneda}. Esta acción no se puede deshacer.`
+              ? (() => {
+                  const base = `Se eliminará: ${showDeleteConfirm.nombre} — ${showDeleteConfirm.moneda}.`;
+                  if (!deleteMovimientosCount) return `${base} Revisando movimientos asociados…`;
+                  if (deleteMovimientosCount.error) {
+                    return `${base} No se pudo comprobar cuántos gastos e ingresos tiene asignados — para no borrar movimientos por error, cierra e intenta de nuevo.`;
+                  }
+                  const { gastos, ingresos } = deleteMovimientosCount;
+                  const total = gastos + ingresos;
+                  const detalle =
+                    total > 0
+                      ? ` Junto con la cuenta se borrarán ${total} movimiento${total !== 1 ? 's' : ''} (${gastos} gasto${gastos !== 1 ? 's' : ''}, ${ingresos} ingreso${ingresos !== 1 ? 's' : ''}) que tienen esta cuenta asignada.`
+                      : ' No tiene gastos ni ingresos asociados.';
+                  return `${base}${detalle} Esta acción no se puede deshacer.`;
+                })()
               : ''
           }
-          confirmText="Eliminar"
+          confirmText={deleting ? 'Eliminando...' : 'Eliminar'}
           cancelText="Cancelar"
           variant="danger"
           showIcon={false}
+          confirmDisabled={!deleteMovimientosCount || deleteMovimientosCount.error || deleting}
         />
       </div>
     </div>
