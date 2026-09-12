@@ -13,6 +13,7 @@ import Modal from '../components/Modal';
 import FloatingModal from '../components/FloatingModal';
 import ConfirmModal from '../components/ConfirmModal';
 import ChartContainer from '../components/ChartContainer';
+import QuantisMascot from '../components/QuantisMascot';
 import { getPieChartOption, getBarChartOption, getChartColors } from '../utils/chartConfig';
 import { useTheme } from '../contexts/ThemeContext';
 import { useSafeArea } from '../hooks/useSafeArea';
@@ -63,8 +64,9 @@ import {
 
 const DASHBOARD_BALANCE_CUENTA_KEY = 'quantis_dashboard_balance_cuenta';
 const DASHBOARD_BALANCE_ORDER_KEY = 'quantis_dashboard_balance_order';
+const DASHBOARD_BALANCE_HIDDEN_KEY = 'quantis_dashboard_balance_hidden';
 
-const SortableAccountItem = ({ id, nombre, isFirst, isLast, onMove }) => {
+const SortableAccountItem = ({ id, nombre, isFirst, isLast, onMove, hidden, onToggleHidden, disableToggle }) => {
   const controls = useDragControls();
   return (
     <Reorder.Item
@@ -72,7 +74,7 @@ const SortableAccountItem = ({ id, nombre, isFirst, isLast, onMove }) => {
       value={id}
       dragListener={false}
       dragControls={controls}
-      className="flex items-center gap-2 p-3 rounded-xl bg-gray-50 dark:bg-gray-700/40 border border-gray-200/60 dark:border-gray-600/60 select-none"
+      className={`flex items-center gap-2 p-3 rounded-xl border select-none ${hidden ? 'bg-gray-50/60 dark:bg-gray-800/30 border-gray-200/40 dark:border-gray-700/40' : 'bg-gray-50 dark:bg-gray-700/40 border-gray-200/60 dark:border-gray-600/60'}`}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
@@ -97,10 +99,22 @@ const SortableAccountItem = ({ id, nombre, isFirst, isLast, onMove }) => {
         </button>
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={nombre}>
+        <div className={`text-sm font-medium truncate ${hidden ? 'text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-gray-100'}`} title={nombre}>
           {nombre}
         </div>
       </div>
+      {onToggleHidden && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); if (!disableToggle) onToggleHidden(); }}
+          disabled={disableToggle}
+          className={`inline-flex items-center justify-center shrink-0 p-1.5 rounded-lg transition-colors bg-transparent ${disableToggle ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 active:bg-gray-200 dark:active:bg-gray-600'}`}
+          aria-label={hidden ? `Mostrar ${nombre} en el carrusel` : `Ocultar ${nombre} del carrusel`}
+          title={disableToggle ? 'Debe quedar al menos una tarjeta visible' : hidden ? 'Mostrar en el carrusel' : 'Ocultar del carrusel'}
+        >
+          {hidden ? <EyeSlashIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+        </button>
+      )}
       <div
         className="flex items-center shrink-0 text-gray-400 dark:text-gray-500 cursor-grab active:cursor-grabbing touch-none"
         onPointerDown={(e) => { e.stopPropagation(); controls.start(e); }}
@@ -152,13 +166,15 @@ const Dashboard = () => {
   const [balanceTrackW, setBalanceTrackW] = useState(0);
   const balanceDxRafRef = useRef({ raf: 0, pendingDx: 0 });
   const isLoadingRef = useRef(false);
-  const { tiposIngreso, tiposGasto, isLoading: isLoadingTipos, createTipoIngreso, createTipoGasto, deleteTipoIngreso, deleteTipoGasto } = useTiposTransaccion();
-  const { cuentas: cuentasActivas, loading: cuentasLoading, cuentaById } = useCuentas({ esActiva: 'true' });
+  const { tiposIngreso, tiposGasto, isLoading: isLoadingTipos, createTipoIngreso, createTipoGasto, deleteTipoIngreso, deleteTipoGasto, conteoPorCategoriaGasto, conteoPorTipoIngreso, reloadConteos } = useTiposTransaccion();
+  const { cuentas: cuentasActivas, loading: cuentasLoading, cuentaById, refetch: refetchCuentas } = useCuentas({ esActiva: 'true' });
   const [balancesPorCuenta, setBalancesPorCuenta] = useState([]);
+  const [isEatingMascot, setIsEatingMascot] = useState(false);
+  const eatingMascotTimeoutRef = useRef(null);
   const [balanceScope, setBalanceScope] = useState(() => {
     try {
       const v = localStorage.getItem(DASHBOARD_BALANCE_CUENTA_KEY);
-      if (v === 'todas' || v === 'sin_cuenta') return v;
+      if (v === 'todas') return v;
       if (v && String(v).length >= 16) return v;
     } catch (_) {}
     return 'todas';
@@ -168,6 +184,15 @@ const Dashboard = () => {
   const [balanceOrder, setBalanceOrder] = useState(() => {
     try {
       const raw = localStorage.getItem(DASHBOARD_BALANCE_ORDER_KEY);
+      const arr = raw ? JSON.parse(raw) : null;
+      return Array.isArray(arr) ? arr.map(String) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+  const [hiddenBalanceIds, setHiddenBalanceIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem(DASHBOARD_BALANCE_HIDDEN_KEY);
       const arr = raw ? JSON.parse(raw) : null;
       return Array.isArray(arr) ? arr.map(String) : [];
     } catch (_) {
@@ -221,7 +246,7 @@ const Dashboard = () => {
       } else {
         setSessionTiposIngreso(prev => prev.filter(s => s.sessionId !== tipoIngresoToDelete.sessionId));
       }
-      if (formData.tipo === label) setFormData(prev => ({ ...prev, tipo: 'quincena', tipoPersonalizado: '' }));
+      if (formData.tipo === label) setFormData(prev => ({ ...prev, tipo: '', tipoPersonalizado: '' }));
     } catch (err) {
       const msg = err?.response?.data?.message || err?.message || 'No se pudo eliminar el tipo. Puede que esté en uso.';
       setFormError(msg);
@@ -245,7 +270,7 @@ const Dashboard = () => {
       } else {
         setSessionTiposGasto(prev => prev.filter(s => s.sessionId !== tipoGastoToDelete.sessionId));
       }
-      if (formData.categoria === label) setFormData(prev => ({ ...prev, categoria: 'alimentacion', categoriaPersonalizada: '' }));
+      if (formData.categoria === label) setFormData(prev => ({ ...prev, categoria: '', categoriaPersonalizada: '' }));
     } catch (err) {
       const msg = err?.response?.data?.message || err?.message || 'No se pudo eliminar la categoría. Puede que esté en uso.';
       setFormError(msg);
@@ -260,17 +285,6 @@ const Dashboard = () => {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  useEffect(() => {
-    if (cuentasLoading) return;
-    if (balanceScope === 'todas' || balanceScope === 'sin_cuenta') return;
-    if (!cuentasActivas.some((c) => c._id === balanceScope)) {
-      setBalanceScope('todas');
-      try {
-        localStorage.setItem(DASHBOARD_BALANCE_CUENTA_KEY, 'todas');
-      } catch (_) {}
-    }
-  }, [cuentasActivas, cuentasLoading, balanceScope]);
-
   const persistBalanceOrder = useCallback((order) => {
     setBalanceOrder(order);
     try {
@@ -278,25 +292,57 @@ const Dashboard = () => {
     } catch (_) {}
   }, []);
 
+  const persistHiddenBalanceIds = useCallback((ids) => {
+    setHiddenBalanceIds(ids);
+    try {
+      localStorage.setItem(DASHBOARD_BALANCE_HIDDEN_KEY, JSON.stringify(ids));
+    } catch (_) {}
+  }, []);
+
   const availableBalanceSlideIds = useMemo(() => {
-    // Incluye los 2 “virtuales” + cuentas activas
-    return ['todas', 'sin_cuenta', ...cuentasActivas.map((c) => String(c._id))];
+    // La cuenta ahora es obligatoria para registrar movimientos, así que ya
+    // no hay slide virtual "Efectivo": solo "todas" y las cuentas reales
+    // que existan. Orden por defecto: las cuentas primero, en el orden en que
+    // se fueron agregando, y "Total" (todas) al final.
+    const otras = cuentasActivas.map((c) => String(c._id));
+    return [...otras, 'todas'];
   }, [cuentasActivas]);
 
-  const balanceSlideIds = useMemo(() => {
-    // Orden persistido + fallback con los que falten
+  // Lista completa ordenada (incluye cuentas ocultas): es la que se muestra en
+  // el modal "Orden de cuentas" para poder reordenar/mostrar de nuevo lo oculto.
+  const orderedSlideIdsAll = useMemo(() => {
     const base = balanceOrder.filter((id) => availableBalanceSlideIds.includes(String(id)));
     const missing = availableBalanceSlideIds.filter((id) => !base.includes(String(id)));
     return [...base, ...missing];
   }, [availableBalanceSlideIds, balanceOrder]);
 
+  // Lista que realmente ve el carrusel: la completa, sin las que estén
+  // ocultas ("Total" incluido: también se puede ocultar).
+  const balanceSlideIds = useMemo(() => {
+    const visible = orderedSlideIdsAll.filter((id) => !hiddenBalanceIds.includes(String(id)));
+    // Nunca dejar el carrusel vacío: si por algún motivo todo quedó oculto,
+    // mostrar igual el primero de la lista completa.
+    return visible.length > 0 ? visible : orderedSlideIdsAll.slice(0, 1);
+  }, [orderedSlideIdsAll, hiddenBalanceIds]);
+
   const resetBalanceOrder = useCallback(() => {
     persistBalanceOrder(availableBalanceSlideIds);
   }, [availableBalanceSlideIds, persistBalanceOrder]);
 
+  // Si el slide activo ya no existe (cuenta eliminada) o quedó oculto, saltar
+  // al primero que siga visible en el carrusel.
+  useEffect(() => {
+    if (cuentasLoading) return;
+    if (balanceSlideIds.includes(balanceScope)) return;
+    const fallback = balanceSlideIds[0] || 'todas';
+    setBalanceScope(fallback);
+    try {
+      localStorage.setItem(DASHBOARD_BALANCE_CUENTA_KEY, fallback);
+    } catch (_) {}
+  }, [cuentasLoading, balanceScope, balanceSlideIds]);
+
   const balanceSlideLabel = useCallback((id) => {
     if (id === 'todas') return 'Total';
-    if (id === 'sin_cuenta') return 'Sin cuenta';
     return cuentasActivas.find((x) => String(x._id) === String(id))?.nombre || 'Cuenta';
   }, [cuentasActivas]);
 
@@ -304,14 +350,15 @@ const Dashboard = () => {
   /** PC (≥1280): modal centrado; tablets (<1280) usan modo cel (bottom sheet) */
   const isDesktopModal = windowWidth >= 1280;
 
-  // Mientras el modal de orden está abierto, usar una copia editable (sin afectar el carrusel en tiempo real)
+  // Mientras el modal de orden está abierto, usar una copia editable (sin afectar el carrusel en tiempo real).
+  // Se parte de la lista COMPLETA (incluye ocultas) para poder mostrarlas de nuevo desde ahí.
   useEffect(() => {
     if (balanceMenuOpen) {
-      setDraftBalanceOrder(balanceSlideIds);
+      setDraftBalanceOrder(orderedSlideIdsAll);
     } else {
       setDraftBalanceOrder(null);
     }
-  }, [balanceMenuOpen, balanceSlideIds]);
+  }, [balanceMenuOpen, orderedSlideIdsAll]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -390,9 +437,9 @@ const Dashboard = () => {
 
   // Estados del formulario
   const [formData, setFormData] = useState({
-    tipo: 'quincena',
+    tipo: '',
     tipoPersonalizado: '',
-    categoria: 'alimentacion',
+    categoria: '',
     categoriaPersonalizada: '',
     monto: '',
     moneda: 'GTQ',
@@ -405,6 +452,7 @@ const Dashboard = () => {
     cuotasTotal: 3,
     cuotasPagadas: 0,
     frecuenciaPagoCuota: 'mensual',
+    metodoPago: 'efectivo',
     tarjetaId: '',
     cuentaId: ''
   });
@@ -429,7 +477,6 @@ const Dashboard = () => {
     const end = new Date(y, m + 1, 0);
     const base = { fechaInicio: formatLocalYmd(start), fechaFin: formatLocalYmd(end) };
     if (!scope || scope === 'todas') return base;
-    if (scope === 'sin_cuenta') return { ...base, sinCuenta: true };
     return { ...base, cuentaId: scope };
   }, [formatLocalYmd]);
 
@@ -456,7 +503,7 @@ const Dashboard = () => {
     ];
     const isValid = validSlugs.includes(formData.tipo) || customLabels.includes(formData.tipo);
     if (formData.tipo && !isValid) {
-      setFormData(prev => ({ ...prev, tipo: 'quincena', tipoPersonalizado: '' }));
+      setFormData(prev => ({ ...prev, tipo: '', tipoPersonalizado: '' }));
     }
   }, [showIngresoModal, formData.tipo, tiposIngreso, sessionTiposIngreso]);
 
@@ -555,6 +602,11 @@ const Dashboard = () => {
         prestamoService.getPrestamos({ estado: 'activo' }).catch(() => ({ data: { prestamos: [] } })),
         cuentaService.getBalances().catch(() => ({ data: { balances: [] } }))
       ]);
+      // Un gasto/ingreso puede haber creado una cuenta "Efectivo" nueva en
+      // el momento (resuelto automático del backend): refrescar la lista de
+      // cuentas para que el balance la reconozca de inmediato, sin esperar
+      // a recargar la página.
+      refetchCuentas();
       const balRaw =
         balancesResponse?.data?.balances ??
         balancesResponse?.balances ??
@@ -805,17 +857,40 @@ const Dashboard = () => {
     return balances;
   }, [resumen]);
 
+  // Saldo real de todas las cuentas (saldoInicial + ingresos - gastos, todo el
+  // historial) para decidir el humor de la mascota - a diferencia de
+  // calculateTotalBalance() arriba, que es el neto del mes/alcance elegido.
+  const cuentasBalanceTotal = useMemo(() => {
+    const agg = { GTQ: 0, USD: 0 };
+    balancesPorCuenta.forEach((r) => {
+      if (r.moneda === 'GTQ') agg.GTQ += Number(r.balance || 0);
+      else if (r.moneda === 'USD') agg.USD += Number(r.balance || 0);
+    });
+    return agg;
+  }, [balancesPorCuenta]);
+
+  const triggerMascotEating = useCallback(() => {
+    setIsEatingMascot(true);
+    if (eatingMascotTimeoutRef.current) window.clearTimeout(eatingMascotTimeoutRef.current);
+    eatingMascotTimeoutRef.current = window.setTimeout(() => setIsEatingMascot(false), 1600);
+  }, []);
+
+  useEffect(() => () => {
+    if (eatingMascotTimeoutRef.current) window.clearTimeout(eatingMascotTimeoutRef.current);
+  }, []);
+
+  const mascotMood = isEatingMascot
+    ? 'eating'
+    : (cuentasBalanceTotal.GTQ < 0 || cuentasBalanceTotal.USD < 0)
+      ? 'sad'
+      : 'happy';
+
   const balanceForScope = useCallback(
     (scope) => {
       if (scope === 'todas') {
         return calculateTotalBalance();
       }
-      const rows = balancesPorCuenta.filter((b) => {
-        if (scope === 'sin_cuenta') {
-          return b.cuentaId == null || b.cuentaId === '';
-        }
-        return b.cuentaId === scope;
-      });
+      const rows = balancesPorCuenta.filter((b) => b.cuentaId === scope);
       const agg = { GTQ: 0, USD: 0 };
       rows.forEach((r) => {
         if (r.moneda === 'GTQ') agg.GTQ += Number(r.balance || 0);
@@ -826,6 +901,17 @@ const Dashboard = () => {
     [balancesPorCuenta, calculateTotalBalance]
   );
 
+  // Saldo de una cuenta específica (por id), para mostrar/validar en los
+  // formularios rápidos de gasto/ingreso del dashboard.
+  const saldoDeCuenta = useCallback(
+    (cuentaId) => {
+      if (!cuentaId) return 0;
+      const row = balancesPorCuenta.find((b) => b.cuentaId === cuentaId);
+      return Number(row?.balance || 0);
+    },
+    [balancesPorCuenta]
+  );
+
   const handleBalanceScopeChange = useCallback((v) => {
     setBalanceScope(v);
     setBalanceDragDx(0);
@@ -833,6 +919,30 @@ const Dashboard = () => {
       localStorage.setItem(DASHBOARD_BALANCE_CUENTA_KEY, v);
     } catch (_) {}
   }, []);
+
+  const toggleHiddenBalanceId = useCallback(
+    (id) => {
+      const key = String(id);
+      const isHidden = hiddenBalanceIds.includes(key);
+      if (!isHidden) {
+        const visibleCount = orderedSlideIdsAll.length - hiddenBalanceIds.length;
+        // No dejar el carrusel sin ningún slide visible: la última tarjeta
+        // visible (sea "Total" o una cuenta) no se puede ocultar.
+        if (visibleCount <= 1) return;
+      }
+      const next = isHidden
+        ? hiddenBalanceIds.filter((x) => x !== key)
+        : [...hiddenBalanceIds, key];
+      persistHiddenBalanceIds(next);
+      // Si acabamos de ocultar el slide que se estaba viendo, saltar al
+      // primer slide que quede visible en vez de asumir que "Total" sigue ahí.
+      if (!isHidden && balanceScope === id) {
+        const fallback = orderedSlideIdsAll.find((x) => x !== key && !next.includes(String(x)));
+        handleBalanceScopeChange(fallback || 'todas');
+      }
+    },
+    [hiddenBalanceIds, persistHiddenBalanceIds, balanceScope, handleBalanceScopeChange, orderedSlideIdsAll]
+  );
 
   const balanceActiveIdx = useMemo(
     () => Math.max(0, balanceSlideIds.indexOf(balanceScope)),
@@ -890,6 +1000,25 @@ const Dashboard = () => {
     [balanceActiveIdx, balanceSlideIds, handleBalanceScopeChange]
   );
 
+  // Limita cuánto se puede arrastrar el carrusel: en los extremos (no hay
+  // cuenta anterior/siguiente) aplica resistencia fuerte para que no se
+  // "asome" nada donde no hay otra tarjeta, y en cualquier caso nunca deja
+  // arrastrar más de un ancho de tarjeta completo (evita revelar de golpe la
+  // tarjeta subsiguiente en un gesto largo o rápido).
+  const clampBalanceDx = useCallback(
+    (dx) => {
+      let clamped = dx;
+      const atFirst = balanceActiveIdx === 0;
+      const atLast = balanceActiveIdx === balanceSlideIds.length - 1;
+      if (atFirst && clamped > 0) clamped /= 3;
+      if (atLast && clamped < 0) clamped /= 3;
+      const w = balanceTrackRef.current?.clientWidth || balanceTrackW || 0;
+      if (w > 0) clamped = Math.max(-w, Math.min(w, clamped));
+      return clamped;
+    },
+    [balanceActiveIdx, balanceSlideIds.length, balanceTrackW]
+  );
+
   const onBalanceTouchStart = useCallback((e) => {
     const t = e.touches[0];
     balanceTouchRef.current = { startX: t.clientX, startY: t.clientY, swiping: false, dx: 0 };
@@ -902,9 +1031,10 @@ const Dashboard = () => {
     const dy = t.clientY - ref.startY;
     if (!ref.swiping && Math.abs(dy) > Math.abs(dx)) return;
     ref.swiping = true;
-    ref.dx = dx;
-    setDxSmooth(dx);
-  }, [setDxSmooth]);
+    const clamped = clampBalanceDx(dx);
+    ref.dx = clamped;
+    setDxSmooth(clamped);
+  }, [setDxSmooth, clampBalanceDx]);
 
   const onBalanceTouchEnd = useCallback(() => {
     const ref = balanceTouchRef.current;
@@ -921,9 +1051,10 @@ const Dashboard = () => {
   const onBalanceMouseMove = useCallback((e) => {
     const ref = balanceMouseRef.current;
     if (!ref.dragging) return;
-    ref.dx = e.clientX - ref.startX;
-    setDxSmooth(ref.dx);
-  }, [setDxSmooth]);
+    const clamped = clampBalanceDx(e.clientX - ref.startX);
+    ref.dx = clamped;
+    setDxSmooth(clamped);
+  }, [setDxSmooth, clampBalanceDx]);
 
   const onBalanceMouseUpOrLeave = useCallback(() => {
     const ref = balanceMouseRef.current;
@@ -966,15 +1097,33 @@ const Dashboard = () => {
     }
   };
 
+  // Preselecciona según en qué cuenta del carrusel de Balance estás
+  // parado: si es una cuenta real (no "Efectivo") y coincide la moneda del
+  // formulario, esa. Fuera de ese caso (viendo "Todas las cuentas", el
+  // slide "Efectivo", o la moneda no coincide), solo se preselecciona si
+  // hay una única cuenta REAL activa en esa moneda — si no (0 o 2+), se
+  // deja en blanco para que la persona elija/cree una cuenta a propósito.
+  // "Efectivo" nunca se autoselecciona en ninguna moneda.
+  const esEfectivo = (c) => (c?.nombre || '').trim().toLowerCase() === 'efectivo';
+
   const pickDefaultCuenta = useCallback(
     (moneda) => {
-      if (!user?.cuentaDefault) return '';
-      const match = cuentasActivas.find(
-        (c) => c._id === user.cuentaDefault && c.moneda === moneda
-      );
-      return match ? match._id : '';
+      // Si estás parado en una cuenta específica del carrusel de Balance
+      // (no "Todas las cuentas") y su moneda coincide con la del
+      // formulario, esa es la cuenta a usar — es una elección explícita.
+      if (balanceScope !== 'todas') {
+        const actual = cuentasActivas.find((c) => c._id === balanceScope);
+        if (actual && actual.moneda === moneda) {
+          return actual._id;
+        }
+      }
+      // "Todas las cuentas" (o la moneda no coincide con la del scope
+      // actual): solo se preselecciona si hay una única cuenta REAL en esa
+      // moneda; si no, se deja en blanco para elegir a propósito.
+      const reales = cuentasActivas.filter((c) => c.moneda === moneda && !esEfectivo(c));
+      return reales.length === 1 ? reales[0]._id : '';
     },
-    [user?.cuentaDefault, cuentasActivas]
+    [cuentasActivas, balanceScope]
   );
 
   const handleIngresoSubmit = async (e) => {
@@ -982,7 +1131,12 @@ const Dashboard = () => {
     try {
       setIsLoadingForm(true);
       setFormError(null);
-      
+
+      if (!formData.cuentaId) {
+        setFormError(`Selecciona (o crea) una cuenta en ${formData.moneda} para continuar.`);
+        return;
+      }
+
       // Preparar los datos para envío
       const dataToSend = {
         ...formData,
@@ -1024,22 +1178,30 @@ const Dashboard = () => {
       setShowIngresoModal(false);
       resetForm();
       loadDashboardData();
+      reloadConteos();
     } catch (error) {
       console.error('Error creando ingreso:', error);
-      setFormError(error?.response?.data?.message || 'Error al crear el ingreso');
+      setFormError(error?.response?.data?.message || error?.message || 'Error al crear el ingreso');
     } finally {
       setIsLoadingForm(false);
     }
   };
 
   const resetForm = () => {
+    // Si estás viendo una cuenta específica en el carrusel de Balance (no
+    // "Todas las cuentas"), el formulario arranca en la moneda de esa
+    // cuenta para que pickDefaultCuenta la preseleccione directamente.
+    const scopeAccount = balanceScope !== 'todas'
+      ? cuentasActivas.find((c) => c._id === balanceScope)
+      : null;
+    const monedaInicial = scopeAccount ? scopeAccount.moneda : 'GTQ';
     setFormData({
-      tipo: 'quincena',
+      tipo: '',
       tipoPersonalizado: '',
-      categoria: 'alimentacion',
+      categoria: '',
       categoriaPersonalizada: '',
       monto: '',
-      moneda: 'GTQ',
+      moneda: monedaInicial,
       fecha: getCurrentDate(),
       descripcion: '',
       esRecurrente: false,
@@ -1049,8 +1211,9 @@ const Dashboard = () => {
       cuotasTotal: 3,
       cuotasPagadas: 0,
       frecuenciaPagoCuota: 'mensual',
+      metodoPago: 'efectivo',
       tarjetaId: '',
-      cuentaId: pickDefaultCuenta('GTQ')
+      cuentaId: pickDefaultCuenta(monedaInicial)
     });
     setFormError(null);
   };
@@ -1143,8 +1306,9 @@ const Dashboard = () => {
     const sinMonto = !formData.monto || montoNum <= 0;
     const sinTipo = !formData.tipo || (formData.tipo === 'personalizado' && !formData.tipoPersonalizado?.trim());
     const sinFecha = !formData.fecha;
-    return sinMonto || sinTipo || sinFecha;
-  }, [formData.monto, formData.tipo, formData.tipoPersonalizado, formData.fecha]);
+    const sinCuenta = !formData.cuentaId?.trim();
+    return sinMonto || sinTipo || sinFecha || sinCuenta;
+  }, [formData.monto, formData.tipo, formData.tipoPersonalizado, formData.fecha, formData.cuentaId]);
 
   // Validación: deshabilitar Crear en modal Gasto si faltan datos
   const gastoInvalido = useMemo(() => {
@@ -1163,10 +1327,16 @@ const Dashboard = () => {
       );
     }
     const sinCategoria = !formData.categoria || (formData.categoria === 'personalizado' && !formData.categoriaPersonalizada?.trim());
-    return !formData.monto || montoNum <= 0 || sinCategoria || !formData.fecha;
+    const sinCuentaOTarjeta =
+      formData.metodoPago === 'tarjeta_credito'
+        ? !formData.tarjetaId?.trim()
+        : !formData.cuentaId?.trim();
+    return !formData.monto || montoNum <= 0 || sinCategoria || !formData.fecha || sinCuentaOTarjeta;
   }, [
     formData.esGastoEnCuotas,
     formData.tarjetaId,
+    formData.cuentaId,
+    formData.metodoPago,
     formData.monto,
     formData.categoria,
     formData.categoriaPersonalizada,
@@ -1175,6 +1345,64 @@ const Dashboard = () => {
     validacionPlazoCuotas.ok,
     tarjetasCredito.length,
   ]);
+
+  // Chips de tipo de ingreso / categoría de gasto, ordenados por cuántos
+  // registros tiene cada uno (el más usado primero). Empates conservan el
+  // orden original gracias al sort estable.
+  const ingresoTipoChips = useMemo(() => {
+    const builtIns = [
+      { kind: 'builtin', value: 'quincena', label: 'Quincena', Icon: WalletIcon },
+      { kind: 'builtin', value: 'fin_mes', label: 'Fin de Mes', Icon: CurrencyDollarIcon },
+      { kind: 'builtin', value: 'comision', label: 'Comisión', Icon: ChartBarIcon },
+      { kind: 'builtin', value: 'inversion', label: 'Inversión', Icon: BanknotesIcon }
+    ];
+    const custom = (tiposIngreso || [])
+      .filter(t => (t.id != null || t._id != null) && !['quincena', 'comision', 'inversion', 'fin_mes'].includes((t.slug || '').toLowerCase()))
+      .map(t => ({
+        kind: 'custom',
+        value: t.label || t.slug,
+        label: t.label,
+        tipoId: t.id ?? t._id,
+        Icon: getIconComponent(normalizeIconKey(t.iconKey, 'WalletIcon'))
+      }));
+    const session = (sessionTiposIngreso || []).map(t => ({
+      kind: 'session',
+      value: t.label,
+      label: t.label,
+      sessionId: t.sessionId,
+      Icon: getIconComponent(normalizeIconKey(t.iconKey, 'WalletIcon'))
+    }));
+    return [...builtIns, ...custom, ...session]
+      .map((item, idx) => ({ ...item, _count: conteoPorTipoIngreso[item.value] || 0, _idx: idx }))
+      .sort((a, b) => b._count - a._count || a._idx - b._idx);
+  }, [tiposIngreso, sessionTiposIngreso, conteoPorTipoIngreso]);
+
+  const gastoCategoriaChips = useMemo(() => {
+    const builtIns = [
+      { kind: 'builtin', value: 'alimentacion', label: 'Alimentación', Icon: ShoppingCartIcon },
+      { kind: 'builtin', value: 'transporte', label: 'Transporte', Icon: TruckIcon },
+      { kind: 'builtin', value: 'otros', label: 'Otros', Icon: EllipsisHorizontalCircleIcon }
+    ];
+    const custom = (tiposGasto || [])
+      .filter(t => (t.id != null || t._id != null) && !['alimentacion', 'transporte', 'otros'].includes((t.slug || '').toLowerCase()))
+      .map(t => ({
+        kind: 'custom',
+        value: t.label || t.slug,
+        label: t.label,
+        catId: t.id ?? t._id,
+        Icon: getIconComponent(normalizeIconKey(t.iconKey, 'ShoppingCartIcon'))
+      }));
+    const session = (sessionTiposGasto || []).map(t => ({
+      kind: 'session',
+      value: t.label,
+      label: t.label,
+      sessionId: t.sessionId,
+      Icon: getIconComponent(normalizeIconKey(t.iconKey, 'ShoppingCartIcon'))
+    }));
+    return [...builtIns, ...custom, ...session]
+      .map((item, idx) => ({ ...item, _count: conteoPorCategoriaGasto[item.value] || 0, _idx: idx }))
+      .sort((a, b) => b._count - a._count || a._idx - b._idx);
+  }, [tiposGasto, sessionTiposGasto, conteoPorCategoriaGasto]);
 
   const handleCancelIngreso = () => {
     setShowIngresoModal(false);
@@ -1221,7 +1449,7 @@ const Dashboard = () => {
         const fechaInicio = new Date(primeraCuota);
         fechaInicio.setHours(0, 0, 0, 0);
         const fechaVencimiento = fechaUltimaCuotaDesdePrimera(fechaInicio, cuotasTotal, frecuenciaPago);
-        fechaVencimiento.setHours(23, 59, 59, 999);
+        fechaVencimiento.setHours(12, 0, 0, 0);
         const proximoPagoDate = proximoPagoTrasCuotasPagadas(fechaInicio, cuotasPagadas, frecuenciaPago);
         proximoPagoDate.setHours(12, 0, 0, 0);
         const nombre = (formData.descripcion || 'Compra a cuotas').trim().substring(0, 100);
@@ -1247,6 +1475,30 @@ const Dashboard = () => {
         return;
       }
 
+      if (formData.metodoPago === 'tarjeta_credito' && !formData.tarjetaId) {
+        setFormError('Selecciona la tarjeta con la que pagaste.');
+        return;
+      }
+
+      if (
+        formData.metodoPago !== 'tarjeta_credito' &&
+        !formData.cuentaId
+      ) {
+        setFormError(`Selecciona (o crea) una cuenta en ${formData.moneda} para continuar.`);
+        return;
+      }
+
+      if (formData.metodoPago !== 'tarjeta_credito' && formData.cuentaId) {
+        const montoNum = parseFloat(String(formData.monto).replace(/,/g, '')) || 0;
+        const disponible = saldoDeCuenta(formData.cuentaId);
+        if (montoNum > disponible) {
+          setFormError(
+            `No tienes suficiente saldo en esta cuenta. Disponible: ${formatCurrency(disponible, formData.moneda)}.`
+          );
+          return;
+        }
+      }
+
       // Gasto normal
       const dataToSend = {
         ...formData,
@@ -1261,7 +1513,9 @@ const Dashboard = () => {
       delete dataToSend.cuotasTotal;
       delete dataToSend.cuotasPagadas;
       delete dataToSend.frecuenciaPagoCuota;
-      delete dataToSend.tarjetaId;
+      if (!(dataToSend.metodoPago === 'tarjeta_credito' && dataToSend.tarjetaId)) {
+        delete dataToSend.tarjetaId;
+      }
       if (!dataToSend.cuentaId) delete dataToSend.cuentaId;
 
       await gastoService.createGasto(dataToSend);
@@ -1269,6 +1523,8 @@ const Dashboard = () => {
       setShowGastoModal(false);
       resetForm();
       loadDashboardData();
+      reloadConteos();
+      triggerMascotEating();
     } catch (error) {
       console.error('Error creando gasto / pagando cuota:', error);
       setFormError(error?.message || (formData.esGastoEnCuotas ? 'Error al crear el plan de cuotas' : 'Error al crear el gasto'));
@@ -1397,9 +1653,7 @@ const Dashboard = () => {
                   Aquí tienes un resumen de tus finanzas
                 </p>
               </div>
-              <div className="p-2 sm:p-3 bg-q-income-muted rounded-lg">
-                <WalletIcon className="h-5 w-5 sm:h-6 sm:w-6 text-q-income" />
-              </div>
+              <QuantisMascot mood={mascotMood} size={windowWidth >= 640 ? 96 : 80} />
             </div>
             
             <div className="mt-3 sm:mt-3.5 pt-3 sm:pt-3.5 border-t border-gray-200 dark:border-gray-700">
@@ -1460,45 +1714,67 @@ const Dashboard = () => {
                   <div
                     className="flex"
                     style={{
-                      transform:
-                        balanceTrackW > 0
-                          ? `translate3d(${-(balanceActiveIdx * balanceTrackW) + balanceDragDx}px, 0, 0)`
-                          : `translateX(calc(-${balanceActiveIdx * 100}% + ${balanceDragDx}px))`,
+                      // Siempre en % (nunca activeIdx * trackW en px): el ancho de
+                      // cada slide es 100% del contenedor, así que trasladar por
+                      // porcentaje es exacto. Multiplicar por balanceTrackW (un
+                      // entero de clientWidth) arrastra un error de redondeo que
+                      // se acumula con el índice y termina asomando la tarjeta
+                      // vecina en reposo, más notorio mientras más lejos del
+                      // primer slide estés.
+                      transform: `translateX(calc(-${balanceActiveIdx * 100}% + ${balanceDragDx}px))`,
                       transition: balanceDragDx !== 0 ? 'none' : 'transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1)',
                       willChange: 'transform'
                     }}
                   >
                     {balanceSlideIds.map((id) => {
                       const b = balanceForScope(id);
+                      const cuentaDeEsteSlide =
+                        id !== 'todas' && id !== 'efectivo'
+                          ? cuentasActivas.find((x) => x._id === id)
+                          : null;
+                      const tieneEfectivoUSD =
+                        id === 'efectivo' &&
+                        cuentasActivas.some(
+                          (c) => c.moneda === 'USD' && (c.nombre || '').trim().toLowerCase() === 'efectivo'
+                        );
                       const label =
                         id === 'todas'
                           ? 'Todas las cuentas'
-                          : id === 'sin_cuenta'
-                            ? 'Sin cuenta asignada'
-                            : (() => {
-                                const c = cuentasActivas.find((x) => x._id === id);
-                                return c ? c.nombre : 'Cuenta';
-                              })();
+                          : id === 'efectivo'
+                            ? 'Efectivo'
+                            : cuentaDeEsteSlide?.nombre || 'Cuenta';
                       return (
                         <div
                           key={id}
                           className="min-w-full shrink-0 flex-[0_0_100%] box-border"
                         >
-                          <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 truncate">
-                            {label}
-                          </p>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <p className="text-sm sm:text-base font-semibold text-gray-800 dark:text-gray-100 truncate">
+                              {label}
+                            </p>
+                          </div>
                           <div className="space-y-1">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-xl sm:text-2xl font-bold tabular-nums text-gray-900 dark:text-white">
-                                {formatCurrency(b.GTQ, 'GTQ')}
-                              </span>
-                            </div>
-                            {b.USD !== 0 && (
+                            {cuentaDeEsteSlide ? (
                               <div className="flex items-center space-x-2">
                                 <span className="text-xl sm:text-2xl font-bold tabular-nums text-gray-900 dark:text-white">
-                                  {formatCurrency(b.USD, 'USD')}
+                                  {formatCurrency(b[cuentaDeEsteSlide.moneda] || 0, cuentaDeEsteSlide.moneda)}
                                 </span>
                               </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-xl sm:text-2xl font-bold tabular-nums text-gray-900 dark:text-white">
+                                    {formatCurrency(b.GTQ, 'GTQ')}
+                                  </span>
+                                </div>
+                                {(id === 'todas' ? b.USD !== 0 : tieneEfectivoUSD) && (
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-xl sm:text-2xl font-bold tabular-nums text-gray-900 dark:text-white">
+                                      {formatCurrency(b.USD, 'USD')}
+                                    </span>
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
@@ -1519,8 +1795,8 @@ const Dashboard = () => {
                         const shortLabel =
                           id === 'todas'
                             ? 'Total'
-                            : id === 'sin_cuenta'
-                              ? 'Sin cuenta'
+                            : id === 'efectivo'
+                              ? 'Efectivo'
                               : cuentasActivas.find((c) => c._id === id)?.nombre || 'Cuenta';
                         return (
                           <button
@@ -1989,7 +2265,7 @@ const Dashboard = () => {
             // Aplicar automáticamente al cerrar (sin afectar el carrusel mientras está abierto)
             const next = draftBalanceOrder ?? null;
             if (Array.isArray(next)) {
-              const current = balanceSlideIds;
+              const current = orderedSlideIdsAll;
               const changed =
                 next.length !== current.length || next.some((v, i) => String(v) !== String(current[i]));
               if (changed) persistBalanceOrder(next);
@@ -2006,20 +2282,22 @@ const Dashboard = () => {
         >
           <div className={isDesktopModal ? 'pt-3 px-6 pb-6' : 'pt-2 px-4 pb-6'}>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-              Reordena aquí. Se guarda automáticamente al cerrar.
+              Reordena aquí, y usa el ícono de ojo para ocultar o mostrar una cuenta en el carrusel. Se guarda automáticamente al cerrar.
             </p>
             <Reorder.Group
               axis="y"
-              values={draftBalanceOrder ?? balanceSlideIds}
+              values={draftBalanceOrder ?? orderedSlideIdsAll}
               onReorder={(next) => setDraftBalanceOrder(next)}
               className="space-y-2"
             >
-              {(draftBalanceOrder ?? balanceSlideIds).map((id, idx) => {
+              {(draftBalanceOrder ?? orderedSlideIdsAll).map((id, idx) => {
                 const nombre = balanceSlideLabel(id);
                 const isFirst = idx === 0;
-                const isLast = idx === (draftBalanceOrder ?? balanceSlideIds).length - 1;
+                const isLast = idx === (draftBalanceOrder ?? orderedSlideIdsAll).length - 1;
+                const isHidden = hiddenBalanceIds.includes(String(id));
+                const isLastVisible = !isHidden && orderedSlideIdsAll.length - hiddenBalanceIds.length <= 1;
                 const moveItem = (dir) => {
-                  const base = draftBalanceOrder ?? balanceSlideIds;
+                  const base = draftBalanceOrder ?? orderedSlideIdsAll;
                   const next = [...base];
                   const target = idx + dir;
                   if (target < 0 || target >= next.length) return;
@@ -2034,6 +2312,9 @@ const Dashboard = () => {
                     isFirst={isFirst}
                     isLast={isLast}
                     onMove={moveItem}
+                    hidden={isHidden}
+                    onToggleHidden={() => toggleHiddenBalanceId(id)}
+                    disableToggle={isLastVisible}
                   />
                 );
               })}
@@ -2192,76 +2473,41 @@ const Dashboard = () => {
                   Tipo de ingreso
                 </label>
                 <div className={`${isDesktopModal ? 'grid grid-cols-2 gap-3' : 'flex gap-3 -mx-2 px-2 overflow-x-auto overflow-y-hidden'} ${!isDesktopModal ? 'flex-nowrap' : ''}`} style={!isDesktopModal ? { scrollbarWidth: 'none', msOverflowStyle: 'none' } : undefined}>
-                  {[
-                    { value: 'quincena', label: 'Quincena', Icon: WalletIcon },
-                    { value: 'fin_mes', label: 'Fin de Mes', Icon: CurrencyDollarIcon },
-                    { value: 'comision', label: 'Comisión', Icon: ChartBarIcon },
-                    { value: 'inversion', label: 'Inversión', Icon: BanknotesIcon }
-                  ].map(({ value, label, Icon }) => {
-                    const isSelected = formData.tipo === value;
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, tipo: value, tipoPersonalizado: '' })}
-                        className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
-                          ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'}
-                          ${isSelected
-                            ? 'bg-q-income-muted border-q-income text-q-income'
-                            : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
-                          }
-                        `}
-                      >
-                        <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-income' : 'text-gray-500 dark:text-gray-400'}`} />
-                        {label}
-                      </button>
-                    );
-                  })}
-                  {/* Tipos personalizados de la API (solo los creados por el usuario, con id) - en PC icono eliminar; en móvil mantener pulsado → ConfirmModal */}
-                  {(tiposIngreso || [])
-                    .filter(t => (t.id != null || t._id != null) && !['quincena', 'comision', 'inversion', 'fin_mes'].includes((t.slug || '').toLowerCase()))
-                    .map(tipo => {
-                      const value = tipo.label || tipo.slug;
-                      const tipoId = tipo.id ?? tipo._id;
-                      const Icon = getIconComponent(normalizeIconKey(tipo.iconKey, 'WalletIcon'));
-                      const isSelected = formData.tipo === value;
-                      const openConfirmDelete = () => setTipoIngresoToDelete({ type: 'api', id: tipoId, label: tipo.label });
+                  {ingresoTipoChips.map((item) => {
+                    const isSelected = formData.tipo === item.value;
+                    const Icon = item.Icon;
+                    if (item.kind === 'builtin') {
                       return (
-                        <div key={tipoId ?? value} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-income-muted border-q-income' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
-                          <button
-                            type="button"
-                            onClick={() => setFormData({ ...formData, tipo: value, tipoPersonalizado: '' })}
-                            className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors"
-                          >
-                            {Icon && <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-income' : 'text-gray-500 dark:text-gray-400'}`} />}
-                            <span className={`truncate ${isSelected ? 'text-q-income' : 'text-gray-600 dark:text-gray-300'}`}>{tipo.label}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); openConfirmDelete(); }}
-                            className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0"
-                            aria-label="Eliminar tipo"
-                          >
-                            <TrashIcon className="w-4 h-4 block" />
-                          </button>
-                        </div>
+                        <button
+                          key={item.value}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, tipo: item.value, tipoPersonalizado: '' })}
+                          className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
+                            ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'}
+                            ${isSelected
+                              ? 'bg-q-income-muted border-q-income text-q-income'
+                              : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                            }
+                          `}
+                        >
+                          <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-income' : 'text-gray-500 dark:text-gray-400'}`} />
+                          {item.label}
+                        </button>
                       );
-                    })}
-                  {/* Tipos de sesión - en PC icono eliminar; en móvil mantener pulsado → ConfirmModal */}
-                  {sessionTiposIngreso.map(tipo => {
-                    const value = tipo.label;
-                    const Icon = getIconComponent(normalizeIconKey(tipo.iconKey, 'WalletIcon'));
-                    const isSelected = formData.tipo === value;
-                    const openConfirmDelete = () => setTipoIngresoToDelete({ type: 'session', sessionId: tipo.sessionId, label: tipo.label });
+                    }
+                    const openConfirmDelete =
+                      item.kind === 'custom'
+                        ? () => setTipoIngresoToDelete({ type: 'api', id: item.tipoId, label: item.label })
+                        : () => setTipoIngresoToDelete({ type: 'session', sessionId: item.sessionId, label: item.label });
                     return (
-                      <div key={tipo.sessionId} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-income-muted border-q-income' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
+                      <div key={item.kind === 'custom' ? (item.tipoId ?? item.value) : item.sessionId} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-income-muted border-q-income' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
                         <button
                           type="button"
-                          onClick={() => setFormData({ ...formData, tipo: value, tipoPersonalizado: '' })}
+                          onClick={() => setFormData({ ...formData, tipo: item.value, tipoPersonalizado: '' })}
                           className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors"
                         >
                           {Icon && <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-income' : 'text-gray-500 dark:text-gray-400'}`} />}
-                          <span className={`truncate ${isSelected ? 'text-q-income' : 'text-gray-600 dark:text-gray-300'}`}>{tipo.label}</span>
+                          <span className={`truncate ${isSelected ? 'text-q-income' : 'text-gray-600 dark:text-gray-300'}`}>{item.label}</span>
                         </button>
                         <button
                           type="button"
@@ -2329,7 +2575,7 @@ const Dashboard = () => {
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
-                    Cuenta (opcional)
+                    Cuenta
                   </label>
                   <select
                     value={formData.cuentaId}
@@ -2345,7 +2591,9 @@ const Dashboard = () => {
                     }}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-q-income min-h-[48px]"
                   >
-                    <option value="">Sin cuenta</option>
+                    {cuentasParaMoneda.filter((c) => !esEfectivo(c)).length === 0 && (
+                      <option value="">Selecciona una cuenta…</option>
+                    )}
                     {cuentasParaMoneda.map((c) => (
                       <option key={c._id} value={c._id}>
                         {c.nombre}
@@ -2355,6 +2603,31 @@ const Dashboard = () => {
                       <option value={SELECT_CREAR_CUENTA}>+ Crear cuenta nueva…</option>
                     )}
                   </select>
+                  {cuentasParaMoneda.filter((c) => !esEfectivo(c)).length === 0 && (
+                    <p className="mt-1.5 ml-1 text-xs text-q-income">
+                      No tienes ninguna cuenta. Crea una antes de continuar.
+                    </p>
+                  )}
+                  {formData.cuentaId && (() => {
+                    const montoNum = parseFloat(String(formData.monto).replace(/,/g, '')) || 0;
+                    const actual = saldoDeCuenta(formData.cuentaId);
+                    return (
+                      <p className="mt-1.5 ml-1 text-xs text-gray-500 dark:text-gray-400">
+                        Saldo actual:{' '}
+                        <span className="font-semibold text-gray-700 dark:text-gray-200">
+                          {formatCurrency(actual, formData.moneda)}
+                        </span>
+                        {montoNum > 0 && (
+                          <>
+                            {' · '}Después de este ingreso:{' '}
+                            <span className="font-semibold text-q-income">
+                              {formatCurrency(actual + montoNum, formData.moneda)}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    );
+                  })()}
                   <p className="mt-1.5 ml-1">
                     <Link
                       to={
@@ -2451,7 +2724,7 @@ const Dashboard = () => {
                       onClick={() => {
                         setIsCreatingIngresoTipo(false);
                         setNuevoIngresoTipo({ label: '', iconKey: 'WalletIcon' });
-                        setFormData({ ...formData, tipo: 'quincena', tipoPersonalizado: '' });
+                        setFormData({ ...formData, tipo: '', tipoPersonalizado: '' });
                         setFormError(null);
                       }}
                       className="text-sm font-medium text-q-income hover:underline flex-shrink-0"
@@ -2782,74 +3055,41 @@ const Dashboard = () => {
                   Categoría de gasto
                 </label>
                 <div className={`${isDesktopModal ? 'grid grid-cols-2 gap-3' : 'flex gap-3 -mx-2 px-2 overflow-x-auto overflow-y-hidden'} ${!isDesktopModal ? 'flex-nowrap' : ''}`} style={!isDesktopModal ? { scrollbarWidth: 'none', msOverflowStyle: 'none' } : undefined}>
-                  {[
-                    { value: 'alimentacion', label: 'Alimentación', Icon: ShoppingCartIcon },
-                    { value: 'transporte', label: 'Transporte', Icon: TruckIcon },
-                    { value: 'otros', label: 'Otros', Icon: EllipsisHorizontalCircleIcon }
-                  ].map(({ value, label, Icon }) => {
-                    const isSelected = formData.categoria === value;
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, categoria: value, categoriaPersonalizada: '' })}
-                        className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
-                          ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'}
-                          ${isSelected
-                            ? 'bg-q-expense-muted border-q-expense text-q-expense'
-                            : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
-                          }
-                        `}
-                      >
-                        <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />
-                        {label}
-                      </button>
-                    );
-                  })}
-                  {/* Categorías personalizadas API (con id) - en PC icono eliminar; en móvil mantener pulsado */}
-                  {(tiposGasto || [])
-                    .filter(t => (t.id != null || t._id != null) && !['alimentacion', 'transporte', 'otros'].includes((t.slug || '').toLowerCase()))
-                    .map(cat => {
-                      const value = cat.label || cat.slug;
-                      const catId = cat.id ?? cat._id;
-                      const Icon = getIconComponent(normalizeIconKey(cat.iconKey, 'ShoppingCartIcon'));
-                      const isSelected = formData.categoria === value;
-                      const openConfirmDelete = () => setTipoGastoToDelete({ type: 'api', id: catId, label: cat.label });
+                  {gastoCategoriaChips.map((item) => {
+                    const isSelected = formData.categoria === item.value;
+                    const Icon = item.Icon;
+                    if (item.kind === 'builtin') {
                       return (
-                        <div key={catId ?? value} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
-                          <button
-                            type="button"
-                            onClick={() => setFormData({ ...formData, categoria: value, categoriaPersonalizada: '' })}
-                            className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors"
-                          >
-                            {Icon && <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />}
-                            <span className={`truncate ${isSelected ? 'text-q-expense' : 'text-gray-600 dark:text-gray-300'}`}>{cat.label}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); openConfirmDelete(); }}
-                            className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0"
-                            aria-label="Eliminar categoría"
-                          >
-                            <TrashIcon className="w-4 h-4 block" />
-                          </button>
-                        </div>
+                        <button
+                          key={item.value}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, categoria: item.value, categoriaPersonalizada: '' })}
+                          className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
+                            ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'}
+                            ${isSelected
+                              ? 'bg-q-expense-muted border-q-expense text-q-expense'
+                              : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                            }
+                          `}
+                        >
+                          <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />
+                          {item.label}
+                        </button>
                       );
-                    })}
-                  {/* Categorías de sesión - en PC icono eliminar; en móvil mantener pulsado */}
-                  {sessionTiposGasto.map(t => {
-                    const Icon = getIconComponent(normalizeIconKey(t.iconKey, 'ShoppingCartIcon'));
-                    const isSelected = formData.categoria === t.label;
-                    const openConfirmDelete = () => setTipoGastoToDelete({ type: 'session', sessionId: t.sessionId, label: t.label });
+                    }
+                    const openConfirmDelete =
+                      item.kind === 'custom'
+                        ? () => setTipoGastoToDelete({ type: 'api', id: item.catId, label: item.label })
+                        : () => setTipoGastoToDelete({ type: 'session', sessionId: item.sessionId, label: item.label });
                     return (
-                      <div key={t.sessionId} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
+                      <div key={item.kind === 'custom' ? (item.catId ?? item.value) : item.sessionId} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
                         <button
                           type="button"
-                          onClick={() => setFormData({ ...formData, categoria: t.label, categoriaPersonalizada: '' })}
+                          onClick={() => setFormData({ ...formData, categoria: item.value, categoriaPersonalizada: '' })}
                           className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors"
                         >
                           {Icon && <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />}
-                          <span className={`truncate ${isSelected ? 'text-q-expense' : 'text-gray-600 dark:text-gray-300'}`}>{t.label}</span>
+                          <span className={`truncate ${isSelected ? 'text-q-expense' : 'text-gray-600 dark:text-gray-300'}`}>{item.label}</span>
                         </button>
                         <button
                           type="button"
@@ -2924,7 +3164,72 @@ const Dashboard = () => {
               {!formData.esGastoEnCuotas && (
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
-                    Cuenta (opcional)
+                    Método de pago
+                  </label>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, metodoPago: 'efectivo', tarjetaId: '' }))}
+                      className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
+                        ${formData.metodoPago !== 'tarjeta_credito'
+                          ? 'bg-q-expense-muted border-q-expense text-q-expense'
+                          : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                        }`}
+                    >
+                      Débito
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, metodoPago: 'tarjeta_credito', cuentaId: '' }))}
+                      className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
+                        ${formData.metodoPago === 'tarjeta_credito'
+                          ? 'bg-q-expense-muted border-q-expense text-q-expense'
+                          : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                        }`}
+                    >
+                      Crédito
+                    </button>
+                  </div>
+                  <p className="mt-1.5 ml-1 text-xs text-gray-500 dark:text-gray-400">
+                    {formData.metodoPago === 'tarjeta_credito'
+                      ? 'Se suma a lo que debes en la tarjeta; no sale de ninguna cuenta.'
+                      : 'Efectivo, débito o transferencia: sale de una cuenta.'}
+                  </p>
+                  {formData.metodoPago === 'tarjeta_credito' && (
+                    <div className="mt-3">
+                      {tarjetasCredito.length > 0 ? (
+                        <>
+                          <select
+                            value={formData.tarjetaId}
+                            onChange={(e) => setFormData(prev => ({ ...prev, tarjetaId: e.target.value }))}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-q-expense min-h-[48px]"
+                          >
+                            <option value="">Selecciona la tarjeta…</option>
+                            {tarjetasCredito.map((t) => (
+                              <option key={t._id} value={t._id}>
+                                {t.nombre}{t.banco ? ` · ${t.banco}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="mt-1.5 ml-1 text-xs text-gray-500 dark:text-gray-400">
+                            Se suma a lo que debes en esta tarjeta (no es una cuota).
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          No tienes tarjetas de crédito con día de corte configurado.{' '}
+                          <Link to="/finanzas/cuotas" state={{ openNuevaTarjeta: true }} className="text-q-expense hover:underline">Configura una</Link>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!formData.esGastoEnCuotas && formData.metodoPago !== 'tarjeta_credito' && (
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
+                    Cuenta
                   </label>
                   <select
                     value={formData.cuentaId}
@@ -2940,7 +3245,9 @@ const Dashboard = () => {
                     }}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-q-expense min-h-[48px]"
                   >
-                    <option value="">Sin cuenta</option>
+                    {cuentasParaMoneda.filter((c) => !esEfectivo(c)).length === 0 && (
+                      <option value="">Selecciona una cuenta…</option>
+                    )}
                     {cuentasParaMoneda.map((c) => (
                       <option key={c._id} value={c._id}>
                         {c.nombre}
@@ -2950,6 +3257,32 @@ const Dashboard = () => {
                       <option value={SELECT_CREAR_CUENTA}>+ Crear cuenta nueva…</option>
                     )}
                   </select>
+                  {cuentasParaMoneda.filter((c) => !esEfectivo(c)).length === 0 && (
+                    <p className="mt-1.5 ml-1 text-xs text-q-expense">
+                      No tienes ninguna cuenta. Crea una antes de continuar.
+                    </p>
+                  )}
+                  {formData.cuentaId && (() => {
+                    const montoNum = parseFloat(String(formData.monto).replace(/,/g, '')) || 0;
+                    const disponible = saldoDeCuenta(formData.cuentaId);
+                    const restante = disponible - montoNum;
+                    return (
+                      <p className="mt-1.5 ml-1 text-xs text-gray-500 dark:text-gray-400">
+                        Saldo disponible:{' '}
+                        <span className="font-semibold text-gray-700 dark:text-gray-200">
+                          {formatCurrency(disponible, formData.moneda)}
+                        </span>
+                        {montoNum > 0 && (
+                          <>
+                            {' · '}Después de este gasto:{' '}
+                            <span className={`font-semibold ${restante < 0 ? 'text-q-expense' : 'text-gray-700 dark:text-gray-200'}`}>
+                              {formatCurrency(restante, formData.moneda)}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    );
+                  })()}
                   <p className="mt-1.5 ml-1">
                     <Link
                       to={
@@ -3049,7 +3382,7 @@ const Dashboard = () => {
                       onClick={() => {
                         setIsCreatingCategoriaGasto(false);
                         setNuevaCategoriaGasto({ label: '', iconKey: 'ShoppingCartIcon' });
-                        setFormData({ ...formData, categoria: 'alimentacion', categoriaPersonalizada: '' });
+                        setFormData({ ...formData, categoria: '', categoriaPersonalizada: '' });
                         setFormError(null);
                       }}
                       className="text-sm font-medium text-q-expense hover:underline flex-shrink-0"

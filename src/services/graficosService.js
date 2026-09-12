@@ -30,6 +30,19 @@ export const graficosService = {
     }
   },
 
+  // Gastos por método de pago: efectivo/débito vs. tarjeta de crédito
+  getGastosMetodoPago: async (params = {}) => {
+    try {
+      const response = await api.get('/graficos/gastos-metodo-pago', { params });
+      return response.data || { metodos: [] };
+    } catch (error) {
+      if (error.response?.status === 404) {
+        return { metodos: [] };
+      }
+      throw error.response?.data || { message: 'Error al obtener gastos por método de pago' };
+    }
+  },
+
   // Evolución temporal de ingresos/gastos (line chart)
   getEvolucion: async (params = {}) => {
     try {

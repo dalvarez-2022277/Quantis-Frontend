@@ -21,6 +21,7 @@ import AboutApp from './pages/AboutApp'
 const TransaccionesPage = lazy(() => import('./pages/TransaccionesPage'))
 const CalendarioPage = lazy(() => import('./pages/CalendarioPage'))
 const FinanzasPage = lazy(() => import('./pages/FinanzasPage'))
+const EstadisticasPage = lazy(() => import('./pages/EstadisticasPage'))
 const AdminFeedback = lazy(() => import('./pages/AdminFeedback'))
 
 const INSTRUCTIONS_SEEN_KEY = 'quantis_instructions_seen'
@@ -145,6 +146,18 @@ function App() {
             <Layout>
               <Suspense fallback={<LoadingSpinner />}>
                 <FinanzasPage />
+              </Suspense>
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/estadisticas"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Suspense fallback={<LoadingSpinner />}>
+                <EstadisticasPage />
               </Suspense>
             </Layout>
           </ProtectedRoute>

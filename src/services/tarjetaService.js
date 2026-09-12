@@ -57,6 +57,16 @@ export const tarjetaService = {
     }
   },
 
+  // Resumen de deuda + ciclos de corte de una tarjeta
+  getResumenTarjeta: async (id, params = {}) => {
+    try {
+      const response = await api.get(`/tarjetas/${id}/resumen`, { params });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { message: 'Error al obtener resumen de la tarjeta' };
+    }
+  },
+
   // Obtener resumen de tarjetas
   getResumenTarjetas: async () => {
     try {

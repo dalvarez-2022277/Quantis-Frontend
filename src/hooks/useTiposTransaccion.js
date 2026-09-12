@@ -1,6 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../services/api';
+import { gastoService } from '../services/gastoService';
+import { ingresoService } from '../services/ingresoService';
 import { DEFAULT_INGRESO_TYPES, DEFAULT_GASTO_CATEGORIES } from '../utils/iconRegistry';
+
+// Suma la cantidad de registros de un resumen (nestResumenGastos/Ingresos:
+// [{_id, totales: [{moneda, total, cantidad}]}]) en un mapa {_id: cantidadTotal},
+// sumando entre monedas ya que el orden de uso no distingue GTQ de USD.
+function contarPorId(resumenRows) {
+  const mapa = {};
+  (resumenRows || []).forEach((row) => {
+    const id = row._id;
+    if (id == null) return;
+    const cantidad = (row.totales || []).reduce((acc, t) => acc + (t.cantidad || 0), 0);
+    mapa[id] = (mapa[id] || 0) + cantidad;
+  });
+  return mapa;
+}
 
 // Hook para manejar tipos dinámicos de ingreso/gasto desde /api/tipos
 export const useTiposTransaccion = () => {
@@ -8,6 +24,25 @@ export const useTiposTransaccion = () => {
   const [tiposGasto, setTiposGasto] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  // Cuántos gastos/ingresos existen por categoría/tipo (todo el historial, sin
+  // filtro de fecha): sirve para ordenar los chips por uso, el más usado primero.
+  const [conteoPorCategoriaGasto, setConteoPorCategoriaGasto] = useState({});
+  const [conteoPorTipoIngreso, setConteoPorTipoIngreso] = useState({});
+
+  const loadConteos = useCallback(async () => {
+    try {
+      const [resGastos, resIngresos] = await Promise.all([
+        gastoService.getResumenGastos().catch(() => null),
+        ingresoService.getResumenIngresos().catch(() => null)
+      ]);
+      const filasGastos = resGastos?.data?.resumen ?? resGastos?.resumen ?? [];
+      const filasIngresos = resIngresos?.data?.resumen ?? resIngresos?.resumen ?? [];
+      setConteoPorCategoriaGasto(contarPorId(filasGastos));
+      setConteoPorTipoIngreso(contarPorId(filasIngresos));
+    } catch (_) {
+      // silencioso: el conteo solo afecta el orden de los chips, no es crítico
+    }
+  }, []);
 
   const loadTipos = useCallback(async () => {
     try {
@@ -65,7 +100,8 @@ export const useTiposTransaccion = () => {
 
   useEffect(() => {
     loadTipos();
-  }, [loadTipos]);
+    loadConteos();
+  }, [loadTipos, loadConteos]);
 
   const createTipo = useCallback(async ({ tipo, label, iconKey, color }) => {
     try {
@@ -142,6 +178,9 @@ export const useTiposTransaccion = () => {
     isLoading,
     error,
     reload: loadTipos,
+    conteoPorCategoriaGasto,
+    conteoPorTipoIngreso,
+    reloadConteos: loadConteos,
     createTipoIngreso,
     createTipoGasto,
     deleteTipoIngreso,

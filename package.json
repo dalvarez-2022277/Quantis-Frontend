@@ -24,8 +24,10 @@
     "vite": "^7.1.7"
   },
   "dependencies": {
+    "@blobatar/react": "^2.7.0",
     "@heroicons/react": "^2.2.0",
     "axios": "^1.12.2",
+    "blobatar": "^2.7.0",
     "crypto-js": "^4.2.0",
     "date-fns": "^3.6.0",
     "echarts": "^5.5.0",

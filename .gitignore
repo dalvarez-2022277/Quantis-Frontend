@@ -24,3 +24,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude Code / graphify local tooling (machine-specific, not shared)
+.claude/
+graphify-out/

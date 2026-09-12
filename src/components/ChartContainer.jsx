@@ -51,14 +51,28 @@ const ChartContainer = forwardRef(({
     }
   }), []);
 
-  // Aplicar tema al gráfico
+  // Aplicar tema al gráfico. IMPORTANTE: un spread superficial ({...option,
+  // ...theme}) hace que theme.tooltip/legend/grid/textStyle REEMPLACEN por
+  // completo lo que la página haya definido para esas claves (un objeto pisa
+  // al otro entero, no se combinan) - así un tooltip con formatter propio, un
+  // grid con márgenes a medida, o un legend con `data` explícito quedaban
+  // silenciosamente descartados. Las claves compartidas se combinan a mano
+  // (el valor de `option` gana en cada subclave) para que el tema aporte los
+  // colores/estilos por defecto sin pisar la estructura que la página pidió.
   const chartOption = useMemo(() => {
     if (!option) return null;
-    
+
     const theme = getChartTheme(darkMode);
+    const mergeShared = (key) =>
+      (option[key] || theme[key]) ? { ...theme[key], ...option[key] } : undefined;
+
     return {
-      ...option,
       ...theme,
+      ...option,
+      tooltip: mergeShared('tooltip'),
+      legend: mergeShared('legend'),
+      grid: mergeShared('grid'),
+      textStyle: mergeShared('textStyle'),
       // Asegurar que el título tenga el tema aplicado
       title: option.title ? {
         ...option.title,

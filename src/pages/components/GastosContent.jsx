@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuthContext } from '../../contexts/AuthContext';
 import { gastoService } from '../../services/gastoService';
+import { cuentaService } from '../../services/cuentaService';
 import { cuotaService } from '../../services/cuotaService';
 import { tarjetaService } from '../../services/tarjetaService';
 import { recurrenciaService } from '../../services/recurrenciaService';
@@ -47,8 +48,8 @@ const GastosContent = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuthContext();
-  const { tiposGasto, isLoading: isLoadingTipos, createTipoGasto, deleteTipoGasto } = useTiposTransaccion();
-  const { cuentas: cuentasActivas, cuentaById } = useCuentas({ esActiva: 'true' });
+  const { tiposGasto, isLoading: isLoadingTipos, createTipoGasto, deleteTipoGasto, conteoPorCategoriaGasto, reloadConteos } = useTiposTransaccion();
+  const { cuentas: cuentasActivas, cuentaById, refetch: refetchCuentas } = useCuentas({ esActiva: 'true' });
   const [windowWidth, setWindowWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1024));
   const isDesktopModal = windowWidth >= 1280;
   const [sessionTiposGasto, setSessionTiposGasto] = useState([]);
@@ -99,7 +100,7 @@ const GastosContent = () => {
 
   // Estados del formulario (igual que Dashboard: Gasto | Gasto en cuotas)
   const [formData, setFormData] = useState({
-    categoria: 'alimentacion',
+    categoria: '',
     categoriaPersonalizada: '',
     monto: '',
     moneda: 'GTQ',
@@ -110,16 +111,36 @@ const GastosContent = () => {
     esGastoEnCuotas: false,
     cuotasTotal: 3,
     cuotasPagadas: 0,
+    metodoPago: 'efectivo',
     tarjetaId: '',
     cuentaId: ''
   });
   
   // Crear refs para cada gasto
   const swipeRefs = useRef({});
+  const [balancesByCuenta, setBalancesByCuenta] = useState({});
+
+  const loadBalances = useCallback(async () => {
+    try {
+      const res = await cuentaService.getBalances();
+      const balances = res?.data?.balances ?? res?.balances ?? [];
+      const byCuenta = {};
+      balances.forEach((b) => {
+        if (b.cuentaId) byCuenta[b.cuentaId] = Number(b.balance || 0);
+      });
+      setBalancesByCuenta(byCuenta);
+    } catch (_) {
+      // silencioso: el saldo es informativo, no bloquea la carga del formulario
+    }
+  }, []);
 
   useEffect(() => {
     loadGastos(currentPage);
   }, [currentPage, itemsPerPage]);
+
+  useEffect(() => {
+    loadBalances();
+  }, [loadBalances]);
 
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth);
@@ -217,15 +238,21 @@ const GastosContent = () => {
     }
   }, [formData.moneda]);
 
+  const esEfectivo = (c) => (c?.nombre || '').trim().toLowerCase() === 'efectivo';
+
+  // La cuenta es obligatoria en cualquier moneda: "Efectivo" nunca se usa
+  // como default, ni aunque ya exista una cuenta con ese nombre (pudo
+  // quedar de antes de esta regla). Solo se preselecciona cuando no hay
+  // ninguna ambigüedad posible: existe exactamente una cuenta REAL (no
+  // "Efectivo") en esa moneda; en cualquier otro caso (0, o 2+) se deja en
+  // blanco para que la persona elija/cree una cuenta a propósito — el
+  // backend rechaza el movimiento si llega en blanco.
   const pickDefaultCuenta = useCallback(
     (moneda) => {
-      if (!user?.cuentaDefault) return '';
-      const match = cuentasActivas.find(
-        (c) => c._id === user.cuentaDefault && c.moneda === moneda
-      );
-      return match ? match._id : '';
+      const reales = cuentasActivas.filter((c) => c.moneda === moneda && !esEfectivo(c));
+      return reales.length === 1 ? reales[0]._id : '';
     },
-    [user?.cuentaDefault, cuentasActivas]
+    [cuentasActivas]
   );
 
   const loadGastos = async (page = 1) => {
@@ -287,7 +314,7 @@ const GastosContent = () => {
         const fechaInicio = new Date(primeraCuota);
         fechaInicio.setHours(0, 0, 0, 0);
         const fechaVencimiento = fechaUltimaCuotaDesdePrimera(fechaInicio, cuotasTotal, frecuenciaPago);
-        fechaVencimiento.setHours(23, 59, 59, 999);
+        fechaVencimiento.setHours(12, 0, 0, 0);
         const proximoPagoDate = proximoPagoTrasCuotasPagadas(fechaInicio, cuotasPagadas, frecuenciaPago);
         proximoPagoDate.setHours(12, 0, 0, 0);
         const nombre = (formData.descripcion || 'Compra a cuotas').trim().substring(0, 100);
@@ -316,6 +343,37 @@ const GastosContent = () => {
         return;
       }
 
+      if (formData.metodoPago === 'tarjeta_credito' && !formData.tarjetaId) {
+        setFormError('Selecciona la tarjeta con la que pagaste.');
+        return;
+      }
+
+      if (
+        formData.metodoPago !== 'tarjeta_credito' &&
+        !formData.cuentaId
+      ) {
+        setFormError(`Selecciona (o crea) una cuenta en ${formData.moneda} para continuar.`);
+        return;
+      }
+
+      if (formData.metodoPago !== 'tarjeta_credito' && formData.cuentaId) {
+        const montoNum = parseFloat(String(formData.monto).replace(/,/g, '')) || 0;
+        // Si editamos un gasto que ya salía de esta misma cuenta, su monto
+        // original ya está descontado del saldo actual: se suma de vuelta
+        // antes de comparar, para no bloquear la edición por su propio gasto.
+        const ajustePorEdicion =
+          editingGasto && (editingGasto.cuenta?._id || editingGasto.cuenta) === formData.cuentaId
+            ? Number(editingGasto.monto || 0)
+            : 0;
+        const disponible = (balancesByCuenta[formData.cuentaId] ?? 0) + ajustePorEdicion;
+        if (montoNum > disponible) {
+          setFormError(
+            `No tienes suficiente saldo en esta cuenta. Disponible: ${formatCurrency(disponible, formData.moneda)}.`
+          );
+          return;
+        }
+      }
+
       const dataToSend = {
         ...formData,
         categoria: formData.categoria === 'personalizado' ? formData.categoriaPersonalizada : formData.categoria
@@ -325,7 +383,20 @@ const GastosContent = () => {
       delete dataToSend.esGastoEnCuotas;
       delete dataToSend.cuotasTotal;
       delete dataToSend.cuotasPagadas;
-      delete dataToSend.tarjetaId;
+      if (dataToSend.metodoPago === 'tarjeta_credito' && dataToSend.tarjetaId) {
+        // se mantiene: liga este gasto suelto a la tarjeta para que cuente en su saldo
+      } else if (editingGasto?.esPagoTarjeta) {
+        // Pago registrado desde Cuotas → tarjeta ("Registrar pago a esta
+        // tarjeta"): metodoPago es 'efectivo' pero el tarjetaId es
+        // intencional (liga el pago a la deuda que reduce). El toggle
+        // Débito/Crédito de este formulario no aplica a este tipo de
+        // registro — no tocar tarjetaId aunque metodoPago no sea crédito.
+        dataToSend.tarjetaId = editingGasto.tarjeta?._id || editingGasto.tarjeta || editingGasto.tarjetaId;
+      } else if (editingGasto) {
+        dataToSend.tarjetaId = null; // limpiar vínculo previo si ya no se paga con tarjeta
+      } else {
+        delete dataToSend.tarjetaId;
+      }
       if (!dataToSend.cuentaId) delete dataToSend.cuentaId;
 
       if (editingGasto) {
@@ -360,9 +431,15 @@ const GastosContent = () => {
       setEditingGasto(null);
       resetForm();
       loadGastos(currentPage);
+      // Si se dejó la cuenta en blanco, el backend pudo haber creado
+      // "Efectivo" en este momento: refrescar para que el selector y los
+      // balances la reconozcan sin esperar a recargar la página.
+      refetchCuentas();
+      loadBalances();
+      reloadConteos();
     } catch (err) {
       console.error('Error guardando gasto:', err);
-      setFormError(err?.response?.data?.message || 'Error al guardar el gasto');
+      setFormError(err?.message || 'Error al guardar el gasto');
     } finally {
       setIsLoadingForm(false);
     }
@@ -385,7 +462,8 @@ const GastosContent = () => {
       esGastoEnCuotas: false,
       cuotasTotal: 3,
       cuotasPagadas: 0,
-      tarjetaId: '',
+      metodoPago: gasto.metodoPago || 'efectivo',
+      tarjetaId: gasto.tarjeta?._id || gasto.tarjeta || '',
       cuentaId: gasto.cuenta || ''
     });
     setShowForm(true);
@@ -400,7 +478,7 @@ const GastosContent = () => {
         setSessionTiposGasto(prev => prev.filter(s => s.sessionId !== tipoGastoToDelete.sessionId));
       }
       if (formData.categoria === (tipoGastoToDelete?.label ?? '')) {
-        setFormData(prev => ({ ...prev, categoria: 'alimentacion', categoriaPersonalizada: '' }));
+        setFormData(prev => ({ ...prev, categoria: '', categoriaPersonalizada: '' }));
       }
     } catch (e) {
       console.error(e);
@@ -429,6 +507,7 @@ const GastosContent = () => {
       esGastoEnCuotas: false,
       cuotasTotal: 3,
       cuotasPagadas: 0,
+      metodoPago: 'efectivo',
       tarjetaId: '',
       cuentaId: gasto.cuenta || ''
     });
@@ -441,6 +520,8 @@ const GastosContent = () => {
       await gastoService.deleteGasto(id);
       setShowDeleteConfirm(null);
       loadGastos(currentPage);
+      loadBalances();
+      reloadConteos();
     } catch (error) {
       console.error('Error eliminando gasto:', error);
       setError('Error al eliminar el gasto');
@@ -454,7 +535,7 @@ const GastosContent = () => {
 
   const resetForm = () => {
     setFormData({
-      categoria: 'alimentacion',
+      categoria: '',
       categoriaPersonalizada: '',
       monto: '',
       moneda: 'GTQ',
@@ -465,6 +546,7 @@ const GastosContent = () => {
       esGastoEnCuotas: false,
       cuotasTotal: 3,
       cuotasPagadas: 0,
+      metodoPago: 'efectivo',
       tarjetaId: '',
       cuentaId: pickDefaultCuenta('GTQ')
     });
@@ -565,10 +647,16 @@ const GastosContent = () => {
       );
     }
     const sinCategoria = !formData.categoria || (formData.categoria === 'personalizado' && !formData.categoriaPersonalizada?.trim());
-    return !formData.monto || montoNum <= 0 || sinCategoria || !formData.fecha;
+    const sinCuentaOTarjeta =
+      formData.metodoPago === 'tarjeta_credito'
+        ? !formData.tarjetaId?.trim()
+        : !formData.cuentaId?.trim();
+    return !formData.monto || montoNum <= 0 || sinCategoria || !formData.fecha || sinCuentaOTarjeta;
   }, [
     formData.esGastoEnCuotas,
     formData.tarjetaId,
+    formData.cuentaId,
+    formData.metodoPago,
     formData.monto,
     formData.categoria,
     formData.categoriaPersonalizada,
@@ -577,6 +665,36 @@ const GastosContent = () => {
     validacionPlazoCuotas.ok,
     tarjetasCredito.length,
   ]);
+
+  // Chips de categoría (built-in + creadas por el usuario + de esta sesión),
+  // ordenados por cuántos gastos registrados tiene cada una (la más usada
+  // primero). Empates conservan el orden original gracias al sort estable.
+  const categoriaChips = useMemo(() => {
+    const builtIns = [
+      { kind: 'builtin', value: 'alimentacion', label: 'Alimentación', Icon: ShoppingCartIcon },
+      { kind: 'builtin', value: 'transporte', label: 'Transporte', Icon: TruckIcon },
+      { kind: 'builtin', value: 'otros', label: 'Otros', Icon: EllipsisHorizontalCircleIcon }
+    ];
+    const custom = (tiposGasto || [])
+      .filter(t => (t.id != null || t._id != null) && !['alimentacion', 'transporte', 'otros'].includes((t.slug || '').toLowerCase()))
+      .map(t => ({
+        kind: 'custom',
+        value: t.label || t.slug,
+        label: t.label,
+        catId: t.id ?? t._id,
+        Icon: getIconComponent(normalizeIconKey(t.iconKey, 'ShoppingCartIcon'))
+      }));
+    const session = (sessionTiposGasto || []).map(t => ({
+      kind: 'session',
+      value: t.label,
+      label: t.label,
+      sessionId: t.sessionId,
+      Icon: getIconComponent(normalizeIconKey(t.iconKey, 'ShoppingCartIcon'))
+    }));
+    return [...builtIns, ...custom, ...session]
+      .map((item, idx) => ({ ...item, _count: conteoPorCategoriaGasto[item.value] || 0, _idx: idx }))
+      .sort((a, b) => b._count - a._count || a._idx - b._idx);
+  }, [tiposGasto, sessionTiposGasto, conteoPorCategoriaGasto]);
 
   const handleCancel = () => {
     setShowForm(false);
@@ -966,54 +1084,36 @@ const GastosContent = () => {
                       Categoría de gasto
                     </label>
                     <div className={`${isDesktopModal ? 'grid grid-cols-2 gap-3' : 'flex gap-3 -mx-2 px-2 overflow-x-auto overflow-y-hidden'} ${!isDesktopModal ? 'flex-nowrap' : ''}`} style={!isDesktopModal ? { scrollbarWidth: 'none', msOverflowStyle: 'none' } : undefined}>
-                      {[
-                        { value: 'alimentacion', label: 'Alimentación', Icon: ShoppingCartIcon },
-                        { value: 'transporte', label: 'Transporte', Icon: TruckIcon },
-                        { value: 'otros', label: 'Otros', Icon: EllipsisHorizontalCircleIcon }
-                      ].map(({ value, label, Icon }) => {
-                        const isSelected = formData.categoria === value;
+                      {categoriaChips.map((item) => {
+                        const isSelected = formData.categoria === item.value;
+                        const Icon = item.Icon;
+                        if (item.kind === 'builtin') {
+                          return (
+                            <button
+                              key={item.value}
+                              type="button"
+                              onClick={() => setFormData({ ...formData, categoria: item.value, categoriaPersonalizada: '' })}
+                              className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
+                                ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'}
+                                ${isSelected ? 'bg-q-expense-muted border-q-expense text-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'}
+                              `}
+                            >
+                              <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />
+                              {item.label}
+                            </button>
+                          );
+                        }
+                        const onDelete =
+                          item.kind === 'custom'
+                            ? () => setTipoGastoToDelete({ type: 'api', id: item.catId, label: item.label })
+                            : () => setTipoGastoToDelete({ type: 'session', sessionId: item.sessionId, label: item.label });
                         return (
-                          <button
-                            key={value}
-                            type="button"
-                            onClick={() => setFormData({ ...formData, categoria: value, categoriaPersonalizada: '' })}
-                            className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
-                              ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'}
-                              ${isSelected ? 'bg-q-expense-muted border-q-expense text-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'}
-                            `}
-                          >
-                            <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />
-                            {label}
-                          </button>
-                        );
-                      })}
-                      {(tiposGasto || []).filter(t => (t.id != null || t._id != null) && !['alimentacion', 'transporte', 'otros'].includes((t.slug || '').toLowerCase())).map(cat => {
-                        const value = cat.label || cat.slug;
-                        const catId = cat.id ?? cat._id;
-                        const Icon = getIconComponent(normalizeIconKey(cat.iconKey, 'ShoppingCartIcon'));
-                        const isSelected = formData.categoria === value;
-                        return (
-                          <div key={catId ?? value} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
-                            <button type="button" onClick={() => setFormData({ ...formData, categoria: value, categoriaPersonalizada: '' })} className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors">
+                          <div key={item.kind === 'custom' ? (item.catId ?? item.value) : item.sessionId} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
+                            <button type="button" onClick={() => setFormData({ ...formData, categoria: item.value, categoriaPersonalizada: '' })} className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors">
                               {Icon && <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />}
-                              <span className={`truncate ${isSelected ? 'text-q-expense' : 'text-gray-600 dark:text-gray-300'}`}>{cat.label}</span>
+                              <span className={`truncate ${isSelected ? 'text-q-expense' : 'text-gray-600 dark:text-gray-300'}`}>{item.label}</span>
                             </button>
-                            <button type="button" onClick={(e) => { e.stopPropagation(); setTipoGastoToDelete({ type: 'api', id: catId, label: cat.label }); }} className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0" aria-label="Eliminar categoría">
-                              <TrashIcon className="w-4 h-4 block" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                      {sessionTiposGasto.map(t => {
-                        const Icon = getIconComponent(normalizeIconKey(t.iconKey, 'ShoppingCartIcon'));
-                        const isSelected = formData.categoria === t.label;
-                        return (
-                          <div key={t.sessionId} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-expense-muted border-q-expense' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
-                            <button type="button" onClick={() => setFormData({ ...formData, categoria: t.label, categoriaPersonalizada: '' })} className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors">
-                              {Icon && <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-expense' : 'text-gray-500 dark:text-gray-400'}`} />}
-                              <span className={`truncate ${isSelected ? 'text-q-expense' : 'text-gray-600 dark:text-gray-300'}`}>{t.label}</span>
-                            </button>
-                            <button type="button" onClick={(e) => { e.stopPropagation(); setTipoGastoToDelete({ type: 'session', sessionId: t.sessionId, label: t.label }); }} className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0" aria-label="Eliminar categoría">
+                            <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(); }} className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0" aria-label="Eliminar categoría">
                               <TrashIcon className="w-4 h-4 block" />
                             </button>
                           </div>
@@ -1056,7 +1156,71 @@ const GastosContent = () => {
                   {!formData.esGastoEnCuotas && (
                     <div>
                       <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
-                        Cuenta (opcional)
+                        Método de pago
+                      </label>
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, metodoPago: 'efectivo', tarjetaId: '' }))}
+                          className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
+                            ${formData.metodoPago !== 'tarjeta_credito'
+                              ? 'bg-q-expense-muted border-q-expense text-q-expense'
+                              : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                            }`}
+                        >
+                          Débito
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, metodoPago: 'tarjeta_credito', cuentaId: '' }))}
+                          className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation
+                            ${formData.metodoPago === 'tarjeta_credito'
+                              ? 'bg-q-expense-muted border-q-expense text-q-expense'
+                              : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                            }`}
+                        >
+                          Crédito
+                        </button>
+                      </div>
+                      <p className="mt-1.5 ml-1 text-xs text-gray-500 dark:text-gray-400">
+                        {formData.metodoPago === 'tarjeta_credito'
+                          ? 'Se suma a lo que debes en la tarjeta; no sale de ninguna cuenta.'
+                          : 'Efectivo, débito o transferencia: sale de una cuenta.'}
+                      </p>
+                      {formData.metodoPago === 'tarjeta_credito' && (
+                        <div className="mt-3">
+                          {tarjetasCredito.length > 0 ? (
+                            <>
+                              <select
+                                value={formData.tarjetaId}
+                                onChange={(e) => setFormData(prev => ({ ...prev, tarjetaId: e.target.value }))}
+                                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-q-expense min-h-[48px]"
+                              >
+                                <option value="">Selecciona la tarjeta…</option>
+                                {tarjetasCredito.map((t) => (
+                                  <option key={t._id} value={t._id}>
+                                    {t.nombre}{t.banco ? ` · ${t.banco}` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                              <p className="mt-1.5 ml-1 text-xs text-gray-500 dark:text-gray-400">
+                                Se suma a lo que debes en esta tarjeta (no es una cuota).
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              No tienes tarjetas de crédito con día de corte configurado.{' '}
+                              <Link to="/finanzas/cuotas" state={{ openNuevaTarjeta: true }} className="text-q-expense hover:underline">Configura una</Link>
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!formData.esGastoEnCuotas && formData.metodoPago !== 'tarjeta_credito' && (
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
+                        Cuenta
                       </label>
                       <select
                         value={formData.cuentaId}
@@ -1072,7 +1236,9 @@ const GastosContent = () => {
                         }}
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-q-expense min-h-[48px]"
                       >
-                        <option value="">Sin cuenta</option>
+                        {cuentasParaMoneda.filter((c) => !esEfectivo(c)).length === 0 && (
+                          <option value="">Selecciona una cuenta…</option>
+                        )}
                         {cuentasParaMoneda.map((c) => (
                           <option key={c._id} value={c._id}>
                             {c.nombre}
@@ -1082,6 +1248,36 @@ const GastosContent = () => {
                           <option value={SELECT_CREAR_CUENTA}>+ Crear cuenta nueva…</option>
                         )}
                       </select>
+                      {cuentasParaMoneda.filter((c) => !esEfectivo(c)).length === 0 && (
+                        <p className="mt-1.5 ml-1 text-xs text-q-expense">
+                          No tienes ninguna cuenta. Crea una antes de continuar.
+                        </p>
+                      )}
+                      {formData.cuentaId && (() => {
+                        const montoNum = parseFloat(String(formData.monto).replace(/,/g, '')) || 0;
+                        const ajustePorEdicion =
+                          editingGasto && (editingGasto.cuenta?._id || editingGasto.cuenta) === formData.cuentaId
+                            ? Number(editingGasto.monto || 0)
+                            : 0;
+                        const disponible = (balancesByCuenta[formData.cuentaId] ?? 0) + ajustePorEdicion;
+                        const restante = disponible - montoNum;
+                        return (
+                          <p className="mt-1.5 ml-1 text-xs text-gray-500 dark:text-gray-400">
+                            Saldo disponible:{' '}
+                            <span className="font-semibold text-gray-700 dark:text-gray-200">
+                              {formatCurrency(disponible, formData.moneda)}
+                            </span>
+                            {montoNum > 0 && (
+                              <>
+                                {' · '}Después de este gasto:{' '}
+                                <span className={`font-semibold ${restante < 0 ? 'text-q-expense' : 'text-gray-700 dark:text-gray-200'}`}>
+                                  {formatCurrency(restante, formData.moneda)}
+                                </span>
+                              </>
+                            )}
+                          </p>
+                        );
+                      })()}
                       <p className="mt-1.5 ml-1">
                         <Link
                           to={
@@ -1145,7 +1341,7 @@ const GastosContent = () => {
                 <div ref={nuevaCategoriaBlockRef} className={`rounded-xl border border-q-expense-muted bg-q-expense-muted/50 dark:bg-q-expense-muted/20 p-4 w-full min-w-0 ${isDesktopModal ? 'col-span-2' : 'mt-3'} ${isDesktopModal ? 'flex flex-col' : 'space-y-4'}`}>
                   <div className="flex items-center justify-between gap-3 w-full flex-shrink-0">
                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate min-w-0">Nueva categoría</span>
-                    <button type="button" onClick={() => { setIsCreatingCategoriaGasto(false); setNuevaCategoriaGasto({ label: '', iconKey: 'ShoppingCartIcon' }); setFormData({ ...formData, categoria: 'alimentacion', categoriaPersonalizada: '' }); setFormError(null); }} className="text-sm font-medium text-q-expense hover:underline flex-shrink-0">Volver</button>
+                    <button type="button" onClick={() => { setIsCreatingCategoriaGasto(false); setNuevaCategoriaGasto({ label: '', iconKey: 'ShoppingCartIcon' }); setFormData({ ...formData, categoria: '', categoriaPersonalizada: '' }); setFormError(null); }} className="text-sm font-medium text-q-expense hover:underline flex-shrink-0">Volver</button>
                   </div>
                   <div className={isDesktopModal ? 'grid gap-4 items-start w-full min-w-0' : 'space-y-4 w-full'} style={isDesktopModal ? { gridTemplateColumns: 'minmax(0, 240px) 1fr' } : undefined}>
                     <div className="min-w-0 space-y-4 w-full">

@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuthContext } from '../../contexts/AuthContext';
 import { ingresoService } from '../../services/ingresoService';
+import { cuentaService } from '../../services/cuentaService';
 import { recurrenciaService } from '../../services/recurrenciaService';
 import SwipeableTransaction from '../../components/SwipeableTransaction';
 import FloatingModal from '../../components/FloatingModal';
@@ -36,8 +37,8 @@ const IngresosContent = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuthContext();
-  const { tiposIngreso, createTipoIngreso, deleteTipoIngreso, isLoading: isLoadingTipos } = useTiposTransaccion();
-  const { cuentas: cuentasActivas, cuentaById } = useCuentas({ esActiva: 'true' });
+  const { tiposIngreso, createTipoIngreso, deleteTipoIngreso, isLoading: isLoadingTipos, conteoPorTipoIngreso, reloadConteos } = useTiposTransaccion();
+  const { cuentas: cuentasActivas, cuentaById, refetch: refetchCuentas } = useCuentas({ esActiva: 'true' });
   const [windowWidth, setWindowWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1024));
   const isDesktopModal = windowWidth >= 1280;
   const [ingresos, setIngresos] = useState([]);
@@ -97,7 +98,7 @@ const IngresosContent = () => {
 
   // Estados del formulario
   const [formData, setFormData] = useState({
-    tipo: 'quincena',
+    tipo: '',
     tipoPersonalizado: '',
     monto: '',
     moneda: 'GTQ',
@@ -110,6 +111,25 @@ const IngresosContent = () => {
   // Refs
   const swipeRefs = useRef({});
   const fechaFormInputRef = useRef(null);
+  const [balancesByCuenta, setBalancesByCuenta] = useState({});
+
+  const loadBalances = React.useCallback(async () => {
+    try {
+      const res = await cuentaService.getBalances();
+      const balances = res?.data?.balances ?? res?.balances ?? [];
+      const byCuenta = {};
+      balances.forEach((b) => {
+        if (b.cuentaId) byCuenta[b.cuentaId] = Number(b.balance || 0);
+      });
+      setBalancesByCuenta(byCuenta);
+    } catch (_) {
+      // silencioso: el saldo es informativo, no bloquea la carga del formulario
+    }
+  }, []);
+
+  useEffect(() => {
+    loadBalances();
+  }, [loadBalances]);
 
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth);
@@ -174,7 +194,7 @@ const IngresosContent = () => {
       } else {
         setSessionTiposIngreso(prev => prev.filter(s => s.sessionId !== tipoIngresoToDelete.sessionId));
       }
-      if (formData.tipo === label) setFormData(prev => ({ ...prev, tipo: 'quincena', tipoPersonalizado: '' }));
+      if (formData.tipo === label) setFormData(prev => ({ ...prev, tipo: '', tipoPersonalizado: '' }));
     } catch (err) {
       const msg = err?.response?.data?.message || err?.message || 'No se pudo eliminar el tipo.';
       setFormError(msg);
@@ -209,15 +229,19 @@ const IngresosContent = () => {
 
   const cuentasParaMoneda = cuentasActivas.filter((c) => c.moneda === formData.moneda);
 
+  const esEfectivo = (c) => (c?.nombre || '').trim().toLowerCase() === 'efectivo';
+
+  // La cuenta es obligatoria en cualquier moneda: nunca se usa "Efectivo"
+  // como default, ni aunque ya exista una cuenta con ese nombre. Solo se
+  // preselecciona si hay exactamente una cuenta REAL (no "Efectivo"); si
+  // no hay ninguna (o hay más de una), el backend rechaza el movimiento y
+  // se pide elegir/crear una cuenta a propósito.
   const pickDefaultCuenta = React.useCallback(
     (moneda) => {
-      if (!user?.cuentaDefault) return '';
-      const match = cuentasActivas.find(
-        (c) => c._id === user.cuentaDefault && c.moneda === moneda
-      );
-      return match ? match._id : '';
+      const reales = cuentasActivas.filter((c) => c.moneda === moneda && !esEfectivo(c));
+      return reales.length === 1 ? reales[0]._id : '';
     },
-    [user?.cuentaDefault, cuentasActivas]
+    [cuentasActivas]
   );
 
   const loadIngresos = async (page = 1) => {
@@ -241,6 +265,12 @@ const IngresosContent = () => {
     setFormError(null);
     try {
       setIsLoadingForm(true);
+
+      if (!formData.cuentaId) {
+        setFormError(`Selecciona (o crea) una cuenta en ${formData.moneda} para continuar.`);
+        return;
+      }
+
       const dataToSend = {
         ...formData,
         tipo: formData.tipo === 'personalizado' ? formData.tipoPersonalizado : formData.tipo
@@ -276,9 +306,15 @@ const IngresosContent = () => {
       setEditingIngreso(null);
       resetForm();
       loadIngresos();
+      // Si se dejó la cuenta en blanco, el backend pudo haber creado
+      // "Efectivo" en este momento: refrescar para que el selector y los
+      // balances la reconozcan sin esperar a recargar la página.
+      refetchCuentas();
+      loadBalances();
+      reloadConteos();
     } catch (err) {
       console.error('Error guardando ingreso:', err);
-      setFormError(err?.response?.data?.message || 'Error al guardar el ingreso');
+      setFormError(err?.message || 'Error al guardar el ingreso');
     } finally {
       setIsLoadingForm(false);
     }
@@ -327,6 +363,8 @@ const IngresosContent = () => {
       await ingresoService.deleteIngreso(id);
       setShowDeleteConfirm(null);
       loadIngresos();
+      loadBalances();
+      reloadConteos();
     } catch (error) {
       console.error('Error eliminando ingreso:', error);
       setError('Error al eliminar el ingreso');
@@ -339,7 +377,7 @@ const IngresosContent = () => {
 
   const resetForm = () => {
     setFormData({
-      tipo: 'quincena',
+      tipo: '',
       tipoPersonalizado: '',
       monto: '',
       moneda: 'GTQ',
@@ -360,7 +398,38 @@ const IngresosContent = () => {
 
   const ingresoInvalido = !formData.monto || parseFloat(String(formData.monto).replace(/,/g, '')) <= 0 ||
     !formData.tipo || (formData.tipo === 'personalizado' && !formData.tipoPersonalizado?.trim()) ||
-    !formData.fecha;
+    !formData.fecha || !formData.cuentaId?.trim();
+
+  // Chips de tipo de ingreso (built-in + creados por el usuario + de esta
+  // sesión), ordenados por cuántos ingresos registrados tiene cada uno (el
+  // más usado primero). Empates conservan el orden original (sort estable).
+  const tipoChips = useMemo(() => {
+    const builtIns = [
+      { kind: 'builtin', value: 'quincena', label: 'Quincena', Icon: WalletIcon },
+      { kind: 'builtin', value: 'fin_mes', label: 'Fin de Mes', Icon: CurrencyDollarIcon },
+      { kind: 'builtin', value: 'comision', label: 'Comisión', Icon: ChartBarIcon },
+      { kind: 'builtin', value: 'inversion', label: 'Inversión', Icon: BanknotesIcon }
+    ];
+    const custom = (tiposIngreso || [])
+      .filter(t => (t.id != null || t._id != null) && !['quincena', 'comision', 'inversion', 'fin_mes'].includes((t.slug || '').toLowerCase()))
+      .map(t => ({
+        kind: 'custom',
+        value: t.label || t.slug,
+        label: t.label,
+        tipoId: t.id ?? t._id,
+        Icon: getIconComponent(normalizeIconKey(t.iconKey, 'WalletIcon'))
+      }));
+    const session = (sessionTiposIngreso || []).map(t => ({
+      kind: 'session',
+      value: t.label,
+      label: t.label,
+      sessionId: t.sessionId,
+      Icon: getIconComponent(normalizeIconKey(t.iconKey, 'WalletIcon'))
+    }));
+    return [...builtIns, ...custom, ...session]
+      .map((item, idx) => ({ ...item, _count: conteoPorTipoIngreso[item.value] || 0, _idx: idx }))
+      .sort((a, b) => b._count - a._count || a._idx - b._idx);
+  }, [tiposIngreso, sessionTiposIngreso, conteoPorTipoIngreso]);
 
   const formatDate = (date) => {
     if (!date) return '';
@@ -519,53 +588,33 @@ const IngresosContent = () => {
                   Tipo de ingreso
                 </label>
                 <div className={`${isDesktopModal ? 'grid grid-cols-2 gap-3' : 'flex overflow-x-auto gap-3 -mx-2 px-2 overflow-y-hidden flex-nowrap'}`} style={!isDesktopModal ? { scrollbarWidth: 'none', msOverflowStyle: 'none' } : undefined}>
-                  {[
-                    { value: 'quincena', label: 'Quincena', Icon: WalletIcon },
-                    { value: 'fin_mes', label: 'Fin de Mes', Icon: CurrencyDollarIcon },
-                    { value: 'comision', label: 'Comisión', Icon: ChartBarIcon },
-                    { value: 'inversion', label: 'Inversión', Icon: BanknotesIcon }
-                  ].map(({ value, label, Icon }) => {
-                    const isSelected = formData.tipo === value;
+                  {tipoChips.map((item) => {
+                    const isSelected = formData.tipo === item.value;
+                    const Icon = item.Icon;
+                    if (item.kind === 'builtin') {
+                      return (
+                        <button
+                          key={item.value}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, tipo: item.value, tipoPersonalizado: '' })}
+                          className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-income-muted border-q-income text-q-income' : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'}`}
+                        >
+                          <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-income' : 'text-gray-500 dark:text-gray-400'}`} />
+                          {item.label}
+                        </button>
+                      );
+                    }
+                    const onDelete =
+                      item.kind === 'custom'
+                        ? () => setTipoIngresoToDelete({ type: 'api', id: item.tipoId, label: item.label })
+                        : () => setTipoIngresoToDelete({ type: 'session', sessionId: item.sessionId, label: item.label });
                     return (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, tipo: value, tipoPersonalizado: '' })}
-                        className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border-2 text-sm font-medium transition-colors touch-manipulation ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-income-muted border-q-income text-q-income' : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'}`}
-                      >
-                        <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-income' : 'text-gray-500 dark:text-gray-400'}`} />
-                        {label}
-                      </button>
-                    );
-                  })}
-                  {(tiposIngreso || []).filter(t => (t.id != null || t._id != null) && !['quincena', 'comision', 'inversion', 'fin_mes'].includes((t.slug || '').toLowerCase())).map(tipo => {
-                    const value = tipo.label || tipo.slug;
-                    const tipoId = tipo.id ?? tipo._id;
-                    const Icon = getIconComponent(normalizeIconKey(tipo.iconKey, 'WalletIcon'));
-                    const isSelected = formData.tipo === value;
-                    return (
-                      <div key={tipoId ?? value} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-income-muted border-q-income' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
-                        <button type="button" onClick={() => setFormData({ ...formData, tipo: value, tipoPersonalizado: '' })} className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors">
+                      <div key={item.kind === 'custom' ? (item.tipoId ?? item.value) : item.sessionId} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-income-muted border-q-income' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
+                        <button type="button" onClick={() => setFormData({ ...formData, tipo: item.value, tipoPersonalizado: '' })} className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors">
                           {Icon && <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-income' : 'text-gray-500 dark:text-gray-400'}`} />}
-                          <span className={`truncate ${isSelected ? 'text-q-income' : 'text-gray-600 dark:text-gray-300'}`}>{tipo.label}</span>
+                          <span className={`truncate ${isSelected ? 'text-q-income' : 'text-gray-600 dark:text-gray-300'}`}>{item.label}</span>
                         </button>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setTipoIngresoToDelete({ type: 'api', id: tipoId, label: tipo.label }); }} className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0" aria-label="Eliminar tipo">
-                          <TrashIcon className="w-4 h-4 block" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {sessionTiposIngreso.map(tipo => {
-                    const value = tipo.label;
-                    const Icon = getIconComponent(normalizeIconKey(tipo.iconKey, 'WalletIcon'));
-                    const isSelected = formData.tipo === value;
-                    return (
-                      <div key={tipo.sessionId} className={`flex items-center rounded-full border-2 min-w-0 ${isDesktopModal ? 'w-full' : 'flex-shrink-0 min-w-[140px]'} ${isSelected ? 'bg-q-income-muted border-q-income' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'}`}>
-                        <button type="button" onClick={() => setFormData({ ...formData, tipo: value, tipoPersonalizado: '' })} className="flex-1 min-w-0 inline-flex items-center gap-2 pl-4 pr-1 py-2.5 text-sm font-medium text-left transition-colors">
-                          {Icon && <Icon className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-q-income' : 'text-gray-500 dark:text-gray-400'}`} />}
-                          <span className={`truncate ${isSelected ? 'text-q-income' : 'text-gray-600 dark:text-gray-300'}`}>{tipo.label}</span>
-                        </button>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setTipoIngresoToDelete({ type: 'session', sessionId: tipo.sessionId, label: tipo.label }); }} className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0" aria-label="Eliminar tipo">
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(); }} className="flex items-center justify-center w-8 h-8 min-w-[32px] min-h-[32px] rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-500 hover:text-q-expense transition-colors mr-1 flex-shrink-0" aria-label="Eliminar tipo">
                           <TrashIcon className="w-4 h-4 block" />
                         </button>
                       </div>
@@ -584,7 +633,7 @@ const IngresosContent = () => {
                   <div ref={nuevoTipoIngresoBlockRef} className="rounded-xl border border-q-income-muted bg-q-income-muted/50 dark:bg-q-income-muted/20 p-4 w-full min-w-0 mt-3">
                     <div className="flex items-center justify-between gap-3 w-full flex-shrink-0 mb-3">
                       <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate min-w-0">Crear tipo personalizado</span>
-                      <button type="button" onClick={() => { setNuevoIngresoTipo({ label: '', iconKey: 'WalletIcon' }); setFormData({ ...formData, tipo: 'quincena', tipoPersonalizado: '' }); setFormError(null); }} className="text-sm font-medium text-q-income hover:underline flex-shrink-0">Volver</button>
+                      <button type="button" onClick={() => { setNuevoIngresoTipo({ label: '', iconKey: 'WalletIcon' }); setFormData({ ...formData, tipo: '', tipoPersonalizado: '' }); setFormError(null); }} className="text-sm font-medium text-q-income hover:underline flex-shrink-0">Volver</button>
                     </div>
                     <div className="space-y-4">
                       <div>
@@ -652,7 +701,7 @@ const IngresosContent = () => {
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 ml-1">
-                  Cuenta (opcional)
+                  Cuenta
                 </label>
                 <select
                   value={formData.cuentaId}
@@ -668,7 +717,9 @@ const IngresosContent = () => {
                   }}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-q-income min-h-[48px]"
                 >
-                  <option value="">Sin cuenta</option>
+                  {cuentasParaMoneda.filter((c) => !esEfectivo(c)).length === 0 && (
+                    <option value="">Selecciona una cuenta…</option>
+                  )}
                   {cuentasParaMoneda.map((c) => (
                     <option key={c._id} value={c._id}>
                       {c.nombre}
@@ -678,6 +729,35 @@ const IngresosContent = () => {
                     <option value={SELECT_CREAR_CUENTA}>+ Crear cuenta nueva…</option>
                   )}
                 </select>
+                {cuentasParaMoneda.filter((c) => !esEfectivo(c)).length === 0 && (
+                  <p className="mt-1.5 ml-1 text-xs text-q-income">
+                    No tienes ninguna cuenta. Crea una antes de continuar.
+                  </p>
+                )}
+                {formData.cuentaId && (() => {
+                  const montoNum = parseFloat(String(formData.monto).replace(/,/g, '')) || 0;
+                  const ajustePorEdicion =
+                    editingIngreso && (editingIngreso.cuenta?._id || editingIngreso.cuenta) === formData.cuentaId
+                      ? Number(editingIngreso.monto || 0)
+                      : 0;
+                  const actual = (balancesByCuenta[formData.cuentaId] ?? 0) - ajustePorEdicion;
+                  return (
+                    <p className="mt-1.5 ml-1 text-xs text-gray-500 dark:text-gray-400">
+                      Saldo actual:{' '}
+                      <span className="font-semibold text-gray-700 dark:text-gray-200">
+                        {formatCurrency(actual, formData.moneda)}
+                      </span>
+                      {montoNum > 0 && (
+                        <>
+                          {' · '}Después de este ingreso:{' '}
+                          <span className="font-semibold text-q-income">
+                            {formatCurrency(actual + montoNum, formData.moneda)}
+                          </span>
+                        </>
+                      )}
+                    </p>
+                  );
+                })()}
                 <p className="mt-1.5 ml-1">
                   <Link
                     to={

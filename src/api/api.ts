@@ -61,8 +61,6 @@ export const authApi = {
   updateProfile: async (userData: {
     name?: string;
     currency?: string;
-    /** ID de cuenta activa; cadena vacía o null quita la predeterminada */
-    cuentaDefaultId?: string | null;
   }) => {
     const response = await api.put('/auth/profile', userData);
     return response.data;
